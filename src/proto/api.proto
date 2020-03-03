@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+// Example message
+message Event {
+	// unique id
+	string id = 1;
+	// unix timestamp
+	int64 timestamp = 2;
+	// magic number
+	int64 magic = 3;	
+	// message
+	string message = 4;
+}
