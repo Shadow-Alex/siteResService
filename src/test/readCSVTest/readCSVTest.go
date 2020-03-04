@@ -12,7 +12,7 @@ import (
 
     jsoniter "github.com/json-iterator/go"
 
-    cm "../../common"
+    cm "siteResService/src/common"
 )
 
 func main() {

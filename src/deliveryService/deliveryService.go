@@ -16,10 +16,10 @@ import (
 	"github.com/micro/go-micro/server"
 	log "github.com/sirupsen/logrus"
 
-	cm "../common"
-	pb "../proto"
-	sc "../scheduler"
-	ut "../util"
+	cm "siteResService/src/common"
+	pb "siteResService/src/proto"
+	sc "siteResService/src/scheduler"
+	ut "siteResService/src/util"
 )
 
 // ServiceDelivery represents delivery service to send and receive event.

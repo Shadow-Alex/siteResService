@@ -13,7 +13,7 @@ import (
 	"github.com/gammazero/workerpool"
 	log "github.com/sirupsen/logrus"
 
-	cm "../common"
+	cm "siteResService/src/common"
 )
 
 // DataBlock represents data block which contains message and extra info

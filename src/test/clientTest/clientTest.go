@@ -13,8 +13,8 @@ import (
 	"github.com/pborman/uuid"
 	log "github.com/sirupsen/logrus"
 
-	cm "../../common"
-	pb "../../proto"
+	cm "siteResService/src/common"
+	pb "siteResService/src/proto"
 )
 
 /********************************************************************

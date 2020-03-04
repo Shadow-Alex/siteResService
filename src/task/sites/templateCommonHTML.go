@@ -10,7 +10,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	log "github.com/sirupsen/logrus"
 
-	cm "../../common"
+	cm "siteResService/src/common"
 )
 
 // ParseInfoCommonHTML for common html template which do request get returns pointer of ProInfo instance
@@ -43,20 +43,20 @@ func (s *SiteService) ParseInfoCommonHTML(pageURL string, doc *goquery.Document,
 	pi.Price = s.ParsePriceHTML(doc, labels.Price)
 
 	// description
-	pi.Desc = s.parseHTMLDesc(doc, pageURL, imageDir, labels.Desc)
+	pi.Desc = s.parseDescHTML(doc, pageURL, imageDir, labels.Desc)
 
 	if orderDoc == nil {  // main and order at the same page or can find order page
-		// specifications
-		pi.Spec = *s.parseHTMLSpec(doc, pageURL, imageDir, labels.Spec)
-
 		// set meal
-		pi.Set = s.parseHTMLSet(doc, pageURL, imageDir, labels.Set)
+		pi.Set = s.parseSetHTML(doc, pageURL, imageDir, labels.Set)
+
+		// specifications
+		pi.Spec = s.parseSpecHTML(doc, pageURL, imageDir, labels.Spec)
 	} else {  // order at another page, request order page to get order document
-		// specifications
-		pi.Spec = *s.parseHTMLSpec(orderDoc, pageURL, imageDir, labels.Spec)
-
 		// set meal
-		pi.Set = s.parseHTMLSet(orderDoc, pageURL, imageDir, labels.Set)
+		pi.Set = s.parseSetHTML(orderDoc, pageURL, imageDir, labels.Set)
+
+		// specifications
+		pi.Spec = s.parseSpecHTML(orderDoc, pageURL, imageDir, labels.Spec)
 	}
 
 	return &pi

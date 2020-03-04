@@ -18,11 +18,11 @@ import (
 	"github.com/astaxie/beego/orm"
 	log "github.com/sirupsen/logrus"
 
-	mc "../mysqlClient"
-	sc "../scheduler"
-	tk "../task"
-	cm "../common"
-	ut "../util"
+	mc "siteResService/src/mysqlClient"
+	sc "siteResService/src/scheduler"
+	tk "siteResService/src/task"
+	cm "siteResService/src/common"
+	ut "siteResService/src/util"
 )
 
 
@@ -165,7 +165,7 @@ func (sa *StandAlone) initSiteResultFile() {
 	titles := []string{"pageURLMD5", "pageURL", "creatTime", "coverInJson", "title", "price", "descriptions", "template"}
 	sa.siteResFile = initSiteFile(cm.SiteResourceFile, titles)
 	// init site specifications file
-	titles = []string{"pageURLMD5", "type", "level", "specifications"}
+	titles = []string{"pageURLMD5", "type", "mapping", "specifications"}
 	sa.siteSpecFile = initSiteFile(cm.SiteSpecFile, titles)
 	// init site set meals file
 	titles = []string{"pageURLMD5", "setMeal"}
@@ -292,9 +292,11 @@ func (sa *StandAlone) TaskSaveResultToFile(data *sc.DataBlock) {
 	writeCSVFile(w, proInfo.Set)
 
 	// chmod
-	fp := proInfo.Cover[0].URL
-	dir := strings.ReplaceAll(fp[:strings.LastIndex(fp, "/") + 1], cm.ImagePrefixUploads, cm.ImageDir)
-	chDirMod(dir)
+	//fp := proInfo.Cover[0].URL
+	//dir := strings.ReplaceAll(fp[:strings.LastIndex(fp, "/") + 1], cm.ImagePrefixUploads, cm.ImageDir)
+	//chDirMod(dir)
+
+	log.Info("finish csv file writing")
 }
 
 // ShowStandaloneADV for standalone file mode to debug

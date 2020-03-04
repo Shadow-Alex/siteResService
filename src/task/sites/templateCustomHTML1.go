@@ -5,12 +5,10 @@
 package sites
 
 import (
-	"time"
-
 	"github.com/PuerkitoBio/goquery"
 	log "github.com/sirupsen/logrus"
 
-	cm "../../common"
+	cm "siteResService/src/common"
 )
 
 /**
@@ -33,8 +31,8 @@ func (s *SiteService) ParseInfoCustomHTML1(pageURL string) *cm.ProInfo {
 	}
 
 	// head image
-	var images []cm.ImageInfo
-	imageDir := cm.ImageDir + time.Now().Format("2006/01/02")
+	var images []string
+	//imageDir := cm.ImageDir + time.Now().Format("2006/01/02")
 	doc.Find("#newpage>a").Each(func(i int, selection *goquery.Selection) {
 		imageSrc, ok := selection.Attr("href")
 		if !ok && len(imageSrc) <= 0 {
@@ -43,10 +41,12 @@ func (s *SiteService) ParseInfoCustomHTML1(pageURL string) *cm.ProInfo {
 
 		// download image
 		imageURL := GetResourceURL(imageSrc, pageURL)
-		imageName, ok := s.http.DownloadImage(imageURL, imageDir, "")
-		if ok {
-			images = append(images, NewImage(imageURL, imageName, imageDir, true))
-		}
+		images = append(images, imageURL)
+
+		//imageName, ok := s.http.DownloadImage(imageURL, imageDir, "")
+		//if ok {
+		//	images = append(images, NewImage(imageURL, imageName, imageDir, true))
+		//}
 	})
 
 	pi.Cover = images
@@ -62,7 +62,7 @@ func (s *SiteService) ParseInfoCustomHTML1(pageURL string) *cm.ProInfo {
 
 	// description
 	pi.Desc, _ = doc.Find("#tab1").Html()
-	pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL, imageDir)
+	pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL)
 
 	// specifications
 	//pi.Spec, _ = doc.Find("#tab3").Html()

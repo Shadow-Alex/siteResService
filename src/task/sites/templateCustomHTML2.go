@@ -5,14 +5,13 @@
 package sites
 
 import (
-	"time"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 	log "github.com/sirupsen/logrus"
 
-	hs "../../httpService"
-	cm "../../common"
+	cm "siteResService/src/common"
+	hs "siteResService/src/httpService"
 )
 
 // ParseInfoCustomHTML2 for custom html template returns pointer of ProInfo instance
@@ -63,15 +62,17 @@ func (s *SiteService) parse1(pageURL string) *cm.ProInfo {
 		return &pi
 	}
 
-	var images []cm.ImageInfo
+	var images []string
 	coverPath, ok := doc.Find(".product_info>img").Attr("src")
-	imageDir := cm.ImageDir + time.Now().Format("2006/01/02")
+	//imageDir := cm.ImageDir + time.Now().Format("2006/01/02")
 	if ok {
 		imageURL := GetResourceURL(coverPath, pageURL)
-		imageName, ok := s.http.DownloadImage(imageURL, imageDir, "")
-		if ok {
-			images = append(images, NewImage(imageURL, imageName, imageDir, true))
-		}
+		images = append(images, imageURL)
+
+		//imageName, ok := s.http.DownloadImage(imageURL, imageDir, "")
+		//if ok {
+		//	images = append(images, NewImage(imageURL, imageName, imageDir, true))
+		//}
 		pi.Cover = images
 	}
 
@@ -95,7 +96,7 @@ func (s *SiteService) parse1(pageURL string) *cm.ProInfo {
 			pi.Desc, _ = selection.Html()
 		}
 	})
-	pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL, imageDir)
+	pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL)
 
 	return &pi
 }

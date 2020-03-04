@@ -24,8 +24,8 @@ import (
 	"github.com/astaxie/beego"
 	log "github.com/sirupsen/logrus"
 
-	cm "../common"
-	ut "../util"
+	cm "siteResService/src/common"
+	ut "siteResService/src/util"
 )
 
 // ServiceHTTP for http request

@@ -16,9 +16,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/tebeka/selenium"
 
-	cm "../common"
-	md "../mysqlClient/models"
-	ut "../util"
+	cm "siteResService/src/common"
+	md "siteResService/src/mysqlClient/models"
+	ut "siteResService/src/util"
 )
 
 // redirectToOrderPage for click order and jump to order page, return yes if redirect success
@@ -430,9 +430,9 @@ func (t *ServiceTask) saveProInfo(ce *cm.CargoExtInfo, pi *cm.ProInfo) {
 	t.db.SingleInsert(itemReptile)
 
 	// chmod
-	fp := pi.Cover[0].URL
-	dir := strings.ReplaceAll(fp[:strings.LastIndex(fp, "/") + 1], cm.ImagePrefixUploads, cm.ImageDir)
-	chDirMod(dir)
+	//fp := pi.Cover[0]
+	//dir := strings.ReplaceAll(fp[:strings.LastIndex(fp, "/") + 1], cm.ImagePrefixUploads, cm.ImageDir)
+	//chDirMod(dir)
 
 	// only for debug
 	log.WithFields(log.Fields{
@@ -475,7 +475,7 @@ func deSerializationImageInfo(record []byte) *[]cm.ImageInfo {
 func getSpecifiedRes(pi *cm.ProInfo, resTitle string) interface{} {
 	switch resTitle {
 		case "cover":
-			return getImageInfoURL(pi.Cover)
+			return pi.Cover
 
 		case "title":
 			return pi.Title

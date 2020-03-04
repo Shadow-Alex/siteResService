@@ -51,7 +51,7 @@ const (
 	// ImagePrefixUploads for image prefix uploads
 	ImagePrefixUploads = "./imageResource/"
 	// ImagePrefixDefault for image prefix default value
-	ImagePrefixDefault = "~/penghu/project/go/siteResService"
+	ImagePrefixDefault = "~/project/go/siteResService"
 
 	// T1ServerURL
 	T1ServerURL = `https://cpc.dotact365.com/sale?id=`
@@ -168,7 +168,7 @@ type ImageInfo struct {
 // ProInfo represents landing page info
 type ProInfo struct {
 	PageURL 	string
-	Cover   	[]ImageInfo  // head image
+	Cover   	[]string  // head image
 	Title   	string
 	Price   	string
 	Desc    	string  // descriptions with image
@@ -186,8 +186,8 @@ type LabelsParse struct {
 	Title		[]string
 	Price		[]string
 	Desc		[]string
-	Spec		[]string
 	Set			[]string
+	Spec		[]string
 }
 
 // CargoExtInfo represents ext info

@@ -6,13 +6,12 @@ package sites
 
 import (
 	"regexp"
-	"time"
 
 	jsoniter "github.com/json-iterator/go"
 	log "github.com/sirupsen/logrus"
 
-	cm "../../common"
-	hs "../../httpService"
+	cm "siteResService/src/common"
+	hs "siteResService/src/httpService"
 )
 
 /**
@@ -48,16 +47,18 @@ func (s *SiteService) ParseInfoCustomJSON1(pageURL string) *cm.ProInfo {
 	}
 
 	// head image
-	var images []cm.ImageInfo
+	var images []string
 	// download image
 	cover := jsoniter.Get(resp.Body, "info", "cover").ToString()
 	imageSrc := cm.T1CND + cover
 	imageURL := GetResourceURL(imageSrc, pageURL)
-	imageDir := cm.ImageDir + time.Now().Format("2006/01/02")
-	imageName, ok := s.http.DownloadImage(imageURL, imageDir, "")
-	if ok {
-		images = append(images, NewImage(imageURL, imageName, imageDir, true))
-	}
+	images = append(images, imageURL)
+
+	//imageDir := cm.ImageDir + time.Now().Format("2006/01/02")
+	//imageName, ok := s.http.DownloadImage(imageURL, imageDir, "")
+	//if ok {
+	//	images = append(images, NewImage(imageURL, imageName, imageDir, true))
+	//}
 
 	//logs.Info(covers)
 	pi.Cover = images
@@ -76,7 +77,7 @@ func (s *SiteService) ParseInfoCustomJSON1(pageURL string) *cm.ProInfo {
 
 	// description
 	pi.Desc = jsoniter.Get(resp.Body, "info", "content").ToString()
-	pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL, imageDir)
+	pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL)
 
 	// specifications
 	//pi.Spec, _ = ""

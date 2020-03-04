@@ -7,29 +7,27 @@ package sites
 import (
 	"os"
 	"io"
+	"io/ioutil"
 	"fmt"
+	"sync"
+	"time"
+	"net/url"
 	"regexp"
 	"strconv"
-	"time"
-	"sync"
 	"strings"
-	"net/url"
-	"io/ioutil"
 	"encoding/csv"
 
-	"github.com/astaxie/beego"
 	"github.com/PuerkitoBio/goquery"
 	jsoniter "github.com/json-iterator/go"
 	log "github.com/sirupsen/logrus"
 
-	sc "../../scheduler"
-	hs "../../httpService"
-	cm "../../common"
-	ut "../../util"
+	cm "siteResService/src/common"
+	hs "siteResService/src/httpService"
+	sc "siteResService/src/scheduler"
+	ut "siteResService/src/util"
 )
 
 type SiteService struct {
-	downloadChan 	chan cm.DownLoadInfo  // for download resource
 	http			*hs.ServiceHTTP
 	scheduler		*sc.Scheduler
 	SitesLabelMaps	sync.Map  // sites label maps
@@ -45,8 +43,6 @@ func GetSiteServiceInstance() *SiteService {
 	initTaskOnce.Do(func() {
 		instance = new(SiteService)
 		instance.init()
-
-		go instance.dispatch()
 
 		log.Info("init site service instance success...")
 	})
@@ -66,8 +62,6 @@ func (s *SiteService) init () {
 		}).Error("get pwd path failed by siteService init, use default")
 	}
 
-	size := beego.AppConfig.DefaultInt("channelSize", cm.MaxChannelSize)
-	s.downloadChan = make(chan cm.DownLoadInfo, size)
 	s.http = hs.GetHTTPInstance()
 	s.scheduler = sc.GetScheduler()
 	s.initSitesLabelMaps()
@@ -82,10 +76,17 @@ func (s *SiteService) init () {
 // and html will use labels in "Order" to get order page href to request order page html, "|" usage for example:
 // ".col-md-6|.title" means to find value in <div class="col-md-6"><div class="title">value</div></div>
 // for web driver, the usage of separate "|" is the same as html,
+// and use ";" to indicates that the previous layer is list, for example:
+// "#data_foreach1|.compose_select;" means to get value list in data:
+// <div id="data_foreach1"><div id="big0" class="compose_select">value</div><div id="big1" class="compose_select">value</div></div>
+// and use "{title:value}" to indicates of the titles and values of specifications, for example:
+// "{.rows-head:.rows-params};" means to get titles of specifications in label ".rows-head" and get values of specifications in label ".rows-params"
+// <div class="rows-head">title1</div><div class="rows-params">value1</div>
+// <div class="rows-head">title2</div><div class="rows-params">value2</div>
 // and web driver will use labels in "Order" to do click and redirect to order page;
 // for json, the usage of separate "|" is the same as html,
 // and use ";" to indicates that the previous layer is list, ";" only use for cover, title, price, and only use once, for example:
-// "data|products|covers;name" means to get value in date:{product:{covers:[name:value,name:value]}}
+// "data|products|covers;name" means to get value in data: {product:{covers:[name:value,name:value]}}
 // addSiteResource for add site resource into SitesLabelMaps templates,
 // the sequence of params []string : domain,character,order,cover,title,price,desc,spec,set,pageURL,type
 func (s *SiteService) addSiteResource(record []string) {
@@ -118,13 +119,13 @@ func (s *SiteService) addSiteResource(record []string) {
 	if len(record[6]) <= 0 || record[6] == "" {
 		descLabels = []string{}
 	}
-	specLabels := strings.Split(record[7], "+")
+	setLabels := strings.Split(record[7], "+")
 	if len(record[7]) <= 0 || record[7] == "" {
-		specLabels = []string{}
-	}
-	setLabels := strings.Split(record[8], "+")
-	if len(record[8]) <= 0 || record[8] == "" {
 		setLabels = []string{}
+	}
+	specLabels := strings.Split(record[8], "+")
+	if len(record[8]) <= 0 || record[8] == "" {
+		specLabels = []string{}
 	}
 
 	value, ok := s.SitesLabelMaps.Load(domainMD5)
@@ -144,11 +145,11 @@ func (s *SiteService) addSiteResource(record []string) {
 		for _, desc := range descLabels {
 			lab.Desc = append(lab.Desc, desc)
 		}
-		for _, spec := range specLabels {
-			lab.Spec = append(lab.Spec, spec)
-		}
 		for _, set := range setLabels {
 			lab.Set = append(lab.Set, set)
+		}
+		for _, spec := range specLabels {
+			lab.Spec = append(lab.Spec, spec)
 		}
 
 		return
@@ -162,8 +163,8 @@ func (s *SiteService) addSiteResource(record []string) {
 		Title:		titleLabels,
 		Price:		priceLabels,
 		Desc:		descLabels,
-		Spec:		specLabels,
 		Set:		setLabels,
+		Spec:		specLabels,
 	}
 	s.SitesLabelMaps.Store(domainMD5, labels)
 }
@@ -390,7 +391,7 @@ func generateImageName(url string, rename string) string {
 }
 
 // ReplaceImagePaths returns description of image
-func (s *SiteService) ReplaceImagePaths(desc string, pageURL string, imageDir string) string {
+func (s *SiteService) ReplaceImagePaths(desc string, pageURL string) string {
 	resourceMap := make(map[string]string)
 	docDesc, _ := goquery.NewDocumentFromReader(strings.NewReader(desc))
 	docDesc.Find("img").Each(func(i int, selection *goquery.Selection) {
@@ -403,55 +404,63 @@ func (s *SiteService) ReplaceImagePaths(desc string, pageURL string, imageDir st
 		}
 
 		imageURL := GetResourceURL(imageSrc, pageURL)
-		imageName := generateImageName(imageURL, "")
-		downloadInfo := cm.DownLoadInfo{
-			URL:	imageURL,
-			Name:	imageName,
-		}
-		s.downloadChan <- downloadInfo  // push to download task, asynchronous download
+		resourceMap[imageSrc] = imageURL
+
+		//imageName := generateImageName(imageURL, "")
+		//downloadInfo := cm.DownLoadInfo{
+		//	URL:	imageURL,
+		//	Name:	imageName,
+		//}
+		//s.downloadChan <- downloadInfo  // push to download task, asynchronous download
 		//imageName, okD := s.http.DownloadImage(imageURL, imageDir, "")
-		resourceMap[imageSrc] = imageDir + "/" + imageName
+		//resourceMap[imageSrc] = imageDir + "/" + imageName
 	})
 
 	docDesc.Find("video").Each(func(i int, selection *goquery.Selection) {
 		videoSrc, okS := selection.Attr("src")
 		if okS && len(videoSrc) > 0 {
 			vURL := GetResourceURL(videoSrc, pageURL)
-			imageName := generateImageName(vURL, "")
-			downloadInfo := cm.DownLoadInfo{
-				URL:	vURL,
-				Name:	imageName,
-			}
-			s.downloadChan <- downloadInfo  // push to download task, asynchronous download
+			resourceMap[videoSrc] = vURL
+
+			//imageName := generateImageName(vURL, "")
+			//downloadInfo := cm.DownLoadInfo{
+			//	URL:	vURL,
+			//	Name:	imageName,
+			//}
+			//s.downloadChan <- downloadInfo  // push to download task, asynchronous download
 			//imageName, okD := s.http.DownloadImage(vURL, imageDir, "")
-			resourceMap[videoSrc] = imageDir + "/" + imageName
+			//resourceMap[videoSrc] = imageDir + "/" + imageName
 		}
 
 		posterSrc, okP := selection.Attr("poster")
 		if okP && len(posterSrc) > 0 {
 			imgURL := GetResourceURL(posterSrc, pageURL)
-			imageName := generateImageName(imgURL, "")
-			downloadInfo := cm.DownLoadInfo{
-				URL:	imgURL,
-				Name:	imageName,
-			}
-			s.downloadChan <- downloadInfo  // push to download task, asynchronous download
+			resourceMap[posterSrc] = imgURL
+
+			//imageName := generateImageName(imgURL, "")
+			//downloadInfo := cm.DownLoadInfo{
+			//	URL:	imgURL,
+			//	Name:	imageName,
+			//}
+			//s.downloadChan <- downloadInfo  // push to download task, asynchronous download
 			//imageName, okD := s.http.DownloadImage(imgURL, imageDir, "")
-			resourceMap[posterSrc] = imageDir + "/" + imageName
+			//resourceMap[posterSrc] = imageDir + "/" + imageName
 		}
 
 		selection.Find("source").Each(func(j int, selection *goquery.Selection) {
 			videoSrc, ok := selection.Attr("src")
 			if ok && len(videoSrc) > 0 {
 				vURL := GetResourceURL(videoSrc, pageURL)
-				imageName := generateImageName(vURL, "")
-				downloadInfo := cm.DownLoadInfo{
-					URL:	vURL,
-					Name:	imageName,
-				}
-				s.downloadChan <- downloadInfo  // push to download task, asynchronous download
+				resourceMap[videoSrc] = vURL
+
+				//imageName := generateImageName(vURL, "")
+				//downloadInfo := cm.DownLoadInfo{
+				//	URL:	vURL,
+				//	Name:	imageName,
+				//}
+				//s.downloadChan <- downloadInfo  // push to download task, asynchronous download
 				//imageName, okD := s.http.DownloadImage(vURL, imageDir, "")
-				resourceMap[videoSrc] = imageDir + "/" + imageName
+				//resourceMap[videoSrc] = imageDir + "/" + imageName
 			}
 		})
 	})
@@ -487,8 +496,9 @@ func checkSelectionLegal(selection interface{}, mode string, labels string, func
 }
 
 // parseCoverImages returns list of ImageInfo instance
-func (s *SiteService) parseCoverImages(selection *goquery.Selection, pageURL string, imageDir string) []cm.ImageInfo {
-	var images []cm.ImageInfo
+func (s *SiteService) parseCoverImages(selection *goquery.Selection, pageURL string, imageDir string) []string {
+	//var images []cm.ImageInfo
+	var images []string
 	selection.Find("img").Each(func(i int, selc *goquery.Selection) {
 		imageSrc, ok := selc.Attr("src")
 		if !ok || len(imageSrc) <= 0 {
@@ -503,22 +513,25 @@ func (s *SiteService) parseCoverImages(selection *goquery.Selection, pageURL str
 
 		// download image
 		imageURL := GetResourceURL(imageSrc, pageURL)
-		imageName := generateImageName(imageURL, "")
-		downloadInfo := cm.DownLoadInfo{
-			URL:	imageURL,
-			Name:	imageName,
-		}
-		s.downloadChan <- downloadInfo  // push to download task, asynchronous download
+		images = append(images, imageURL)
+
+		//imageName := generateImageName(imageURL, "")
+		//downloadInfo := cm.DownLoadInfo{
+		//	URL:	imageURL,
+		//	Name:	imageName,
+		//}
+		//s.downloadChan <- downloadInfo  // push to download task, asynchronous download
 		//imageName, ok := s.http.DownloadImage(imageURL, imageDir, "")
-		images = append(images, NewImage(imageURL, imageName, imageDir, true))
+		//images = append(images, NewImage(imageURL, imageName, imageDir, true))
 	})
 
 	return images
 }
 
 // ParseCoverImagesHTML parse by html, returns list of cover ImageInfo instance
-func (s *SiteService) ParseCoverImagesHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) []cm.ImageInfo {
-	var images []cm.ImageInfo
+func (s *SiteService) ParseCoverImagesHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) []string {
+	//var images []cm.ImageInfo
+	var images []string
 	for _, selector := range selectors {
 		labels := strings.Split(selector, cm.LabelSeparate)
 		selection := doc.Find(labels[0])
@@ -535,7 +548,7 @@ func (s *SiteService) ParseCoverImagesHTML(doc *goquery.Document, pageURL string
 			//  debug
 			log.WithFields(log.Fields{
 				"coverLabel":	selector,
-			}).Debug("ParseCoverImages success")
+			}).Debug("ParseCoverImagesHTML success")
 
 			return images
 		}
@@ -544,14 +557,15 @@ func (s *SiteService) ParseCoverImagesHTML(doc *goquery.Document, pageURL string
 	//  debug
 	log.WithFields(log.Fields{
 		"coverLabel":	selectors,
-	}).Debug("can not get cover by ParseCoverImages")
+	}).Debug("can not get cover by ParseCoverImagesHTML")
 
 	return images
 }
 
 // ParseCoverImagesJSON parse by json, returns list of cover ImageInfo instance
-func (s *SiteService) ParseCoverImagesJSON(body []byte, pageURL string, imageDir string, selectors []string) []cm.ImageInfo {
-	var images []cm.ImageInfo
+func (s *SiteService) ParseCoverImagesJSON(body []byte, pageURL string, imageDir string, selectors []string) []string {
+	//var images []cm.ImageInfo
+	var images []string
 	for _, selector := range selectors {
 		labelList := strings.Split(selector, cm.ListSeparate)
 		labels := strings.Split(labelList[0], cm.LabelSeparate)
@@ -566,31 +580,35 @@ func (s *SiteService) ParseCoverImagesJSON(body []byte, pageURL string, imageDir
 		}
 
 		var imageURL string
-		if len(labelList) > 1 { // if contains "#", means labelList[1] indicates that the previous layer is list
+		if len(labelList) > 1 { // if contains ";", means labelList[1] indicates that the previous layer is list
 			iterNum := jsonIter.Size()
 			for i := 0; i < iterNum; i++ {
 				imageURL = jsonIter.Get(i).Get(labelList[1]).ToString()
 				imageURL = GetResourceURL(imageURL, pageURL)
-				imageName := generateImageName(imageURL, "")
-				downloadInfo := cm.DownLoadInfo{
-					URL:	imageURL,
-					Name:	imageName,
-				}
-				s.downloadChan <- downloadInfo  // push to download task, asynchronous download
+				images = append(images, imageURL)
+
+				//imageName := generateImageName(imageURL, "")
+				//downloadInfo := cm.DownLoadInfo{
+				//	URL:	imageURL,
+				//	Name:	imageName,
+				//}
+				//s.downloadChan <- downloadInfo  // push to download task, asynchronous download
 				//imageName, ok := s.http.DownloadImage(imageURL, imageDir, "")
-				images = append(images, NewImage(imageURL, imageName, imageDir, true))
+				//images = append(images, NewImage(imageURL, imageName, imageDir, true))
 			}
 		} else {
-			imageURL = jsonIter.ToString()  // if do not contains "#" means do not has list layer
+			imageURL = jsonIter.ToString()  // if do not contains ";" means do not has list layer
 			imageURL = GetResourceURL(imageURL, pageURL)
-			imageName := generateImageName(imageURL, "")
-			downloadInfo := cm.DownLoadInfo{
-				URL:	imageURL,
-				Name:	imageName,
-			}
-			s.downloadChan <- downloadInfo  // push to download task, asynchronous download
+			images = append(images, imageURL)
+
+			//imageName := generateImageName(imageURL, "")
+			//downloadInfo := cm.DownLoadInfo{
+			//	URL:	imageURL,
+			//	Name:	imageName,
+			//}
+			//s.downloadChan <- downloadInfo  // push to download task, asynchronous download
 			//imageName, ok := s.http.DownloadImage(imageURL, imageDir, "")
-			images = append(images, NewImage(imageURL, imageName, imageDir, true))
+			//images = append(images, NewImage(imageURL, imageName, imageDir, true))
 		}
 
 		if len(images) > 0 {
@@ -629,7 +647,7 @@ func (s *SiteService) ParseTitleHTML(doc *goquery.Document, selectors []string) 
 			//  debug
 			log.WithFields(log.Fields{
 				"titleLabel":	selector,
-			}).Debug("ParseTitle success")
+			}).Debug("ParseTitleHTML success")
 
 			return title
 		}
@@ -776,15 +794,102 @@ func (s *SiteService) ParsePriceJSON(body []byte, selectors []string) string {
 // iterativeHTML for iterative locate selection return located selection
 func iterativeHTML(selection *goquery.Selection, selector string) *goquery.Selection {
 	labels := strings.Split(selector, cm.LabelSeparate)
-	for i := 1; i < len(labels); i++ {  // cascade find label
+	for i := 0; i < len(labels); i++ {  // cascade find label
 		selection = selection.Find(labels[i])
+		if !checkSelectionLegal(selection, "html", selector, "iterativeHTML") {
+			break
+		}
 	}
 
 	return selection
 }
 
-// iterativeHTML for iterative locate selection return located selection
-func iterativeLoopHTML(selection *goquery.Selection, selector string, levels []string, level int, urlMD5 string, style string, dataList *[][]string) *[][]string {
+// parseDescHTML for get desc html string and download image by parse doc, return html
+func (s *SiteService) parseDescHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) string {
+	var html string
+
+	for _, selector := range selectors {
+		selection := iterativeHTML(doc.Selection, selector)  // get first
+		if !checkSelectionLegal(selection, "html", selector, "parseDescHTML") {
+			continue
+		}
+
+		html, _ = selection.Html()
+		if len(html) > 0 {
+			html = s.ReplaceImagePaths(html, pageURL)
+
+			//  debug
+			log.WithFields(log.Fields{
+				"htmlLabel":	selector,
+			}).Debug("parseDescHTML success")
+
+			return html
+		}
+	}
+
+	// debug
+	if len(html) <= 0 {
+		//  debug
+		log.WithFields(log.Fields{
+			"htmlLabel":	selectors,
+		}).Debug("can not get desc by parseDescHTML")
+	}
+
+	return html
+}
+
+// parseSetHTML for get set meal html string and download image by parse doc, return html
+func (s *SiteService) parseSetHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) [][]string {
+	var dataList [][]string
+	urlMD5 := ut.GetMD5(pageURL)
+
+	for _, selector := range selectors {
+		selection := iterativeHTML(doc.Selection, selector)  // get first
+		if !checkSelectionLegal(selection, "html", selector, "parseSetHTML") {
+			continue
+		}
+
+		// get list
+		selection.Each(func(i int, selc *goquery.Selection) {
+			var data []string
+			html, _ := selc.Html()
+			if len(html) <= 0 {
+				log.Debug("this selection of html is empty by parseSetHTML")
+
+				return
+			}
+
+			html = s.ReplaceImagePaths(html, pageURL)
+			data = append(data, urlMD5)
+			data = append(data, html)
+			dataList = append(dataList, data)
+		})
+
+		if len(dataList) > 0 {
+			//  debug
+			log.WithFields(log.Fields{
+				"htmlLabel":	selector,
+			}).Debug("parseSetHTML success")
+
+			break
+		}
+	}
+
+	// debug
+	if len(dataList) <= 0 {
+		//  debug
+		log.WithFields(log.Fields{
+			"htmlLabel":	selectors,
+		}).Debug("can not get set by parseSetHTML")
+	}
+
+	return dataList
+}
+
+// TODO: can not get mapping to set meal
+// iterativeLoopHTML return pointer list of spec data
+// levels for match spec data and set data, first set data match level1 spec data
+func iterativeLoopHTML(selection *goquery.Selection, selector string, urlMD5 string, style string, levels []string, level int, dataList *[][]string) *[][]string {
 	index := strings.Index(selector, cm.ListSeparate)
 	if index == -1 {
 		selection = iterativeHTML(selection, selector)
@@ -806,92 +911,53 @@ func iterativeLoopHTML(selection *goquery.Selection, selector string, levels []s
 	}
 
 	// get style and its labels
-	sub := setKVMatch.FindAllString(selector[: index], 1)
-	if len(sub) > 0 {
-		values := strings.Split(sub[0], ":")
-		style = selection.Find(values[0]).Text()  // get style
-		selection = selection.Find(values[1])  // get style's html
+	var styleTitles []string
+	iterSelector := selector[: index]
+	sub := setKVMatch.FindStringSubmatch(iterSelector)  // match style labels
+	if len(sub) > 1 {
+		values := strings.Split(sub[1], ":")
+		styleSection := selection  // separate from get style value and style title
+		styleSection.Find(values[0]).Each(func(i int, selc *goquery.Selection) { // get style title
+			styleTitles = append(styleTitles, strings.TrimSpace(selc.Text()))
+		})
+		iterSelector = values[1]  // get style value's labels
 	}
 
-	selection = iterativeHTML(selection, selector[: index])  // get first
-	if !checkSelectionLegal(selection, "html", selector, "parseHTMLStrImage") {
+	selection = iterativeHTML(selection, iterSelector)
+	if !checkSelectionLegal(selection, "html", selector[: index], "iterativeLoopHTML") {
 		return dataList
 	}
 
+	// travers all the list label marked by ";"
 	selection.Each(func(i int, selc *goquery.Selection) {
-		levels = append(levels, "level-" + strconv.Itoa(level))
-		dataList = iterativeLoopHTML(selc, selector[index + 1 :], levels, level + 1, urlMD5, style, dataList) // process rest, and +1 to avoid cm.ListSeparate
+		var style string
+		// pass style title params only if the num of style titles match the num of style style values
+		if len(styleTitles) > 0 && len(styleTitles) == selection.Size(){
+			style = styleTitles[i]
+		} else {
+			levels = append(levels, "level" + strconv.Itoa(level) + "-" + strconv.Itoa(i))
+		}
+
+		dataList = iterativeLoopHTML(selc, selector[index + 1 :], urlMD5, style, levels, level + 1, dataList) // process rest, and +1 to avoid cm.ListSeparate
 	})
 
 	return dataList
 }
 
-// parseHTMLDesc for get desc html string and download image by parse doc, return html
-func (s *SiteService) parseHTMLDesc(doc *goquery.Document, pageURL string, imageDir string, selectors []string) string {
-	var html string
-
-	for _, selector := range selectors {
-		selection := iterativeHTML(doc.Selection, selector)  // get first
-		if !checkSelectionLegal(selection, "html", selector, "parseHTMLStrImage") {
-			continue
-		}
-
-		html, _ = selection.Html()
-		if len(html) > 0 {
-			html = s.ReplaceImagePaths(html, pageURL, imageDir)
-
-			//  debug
-			log.WithFields(log.Fields{
-				"htmlLabel":	selector,
-			}).Debug("parseHTMLStrImage success")
-
-			return html
-		}
-	}
-
-	// debug
-	if len(html) <= 0 {
-		//  debug
-		log.WithFields(log.Fields{
-			"htmlLabel":	selectors,
-		}).Debug("html is empty by parseHTMLStrImage")
-	}
-
-	return html
-}
-
-// parseHTMLSet for get set meal html string and download image by parse doc, return html
-func (s *SiteService) parseHTMLSet(doc *goquery.Document, pageURL string, imageDir string, selectors []string) [][]string {
+// parseSpecHTML for get spec html string and download image by parse doc, return html
+func (s *SiteService) parseSpecHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) [][]string {
 	var dataList [][]string
 	urlMD5 := ut.GetMD5(pageURL)
 
 	for _, selector := range selectors {
-		selection := iterativeHTML(doc.Selection, selector)  // get first
-		if !checkSelectionLegal(selection, "html", selector, "parseHTMLStrImage") {
-			continue
-		}
-
-		// get list
-		selection.Each(func(i int, selc *goquery.Selection) {
-			var data []string
-			html, _ := selc.Html()
-			if len(html) <= 0 {
-				log.Debug("this selection of html is empty by parseHTMLImage")
-
-				return
-			}
-
-			html = s.ReplaceImagePaths(html, pageURL, imageDir)
-			data = append(data, urlMD5)
-			data = append(data, html)
-			dataList = append(dataList, data)
-		})
+		var levels []string
+		dataList = *iterativeLoopHTML(doc.Selection, selector, urlMD5, "", levels, 1, &dataList)  // iterative till first list
 
 		if len(dataList) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
 				"htmlLabel":	selector,
-			}).Debug("parseHTMLStrImage success")
+			}).Debug("parseSpecHTML success")
 
 			break
 		}
@@ -902,89 +968,101 @@ func (s *SiteService) parseHTMLSet(doc *goquery.Document, pageURL string, imageD
 		//  debug
 		log.WithFields(log.Fields{
 			"htmlLabel":	selectors,
-		}).Debug("html is empty by parseHTMLStrImage")
+		}).Debug("can not get spec by parseSpecHTML")
 	}
 
 	return dataList
 }
 
+// iterativeJSON for iterative locate selection return located pointer of jsoniter.Any
+func iterativeJSON(jIter jsoniter.Any, labels []string) jsoniter.Any {
+	for i := 0; i < len(labels); i++ {  // cascade find label
+		jIter = jIter.Get(labels[i])
+		if !checkSelectionLegal(jIter, "json", strings.Join(labels, "|"), "iterativeJSON") {
+			break
+		}
+	}
 
-// parseHTMLSpec for get spec html string and download image by parse doc, return html
-func (s *SiteService) parseHTMLSpec(doc *goquery.Document, pageURL string, imageDir string, selectors []string) *[][]string {
-	var dataList *[][]string
-	urlMD5 := ut.GetMD5(pageURL)
+	return jIter
+}
 
+// parseDescJSON for get string and download image by parse doc, return html
+func (s *SiteService) parseDescJSON(body []byte, selectors []string) string {
+	var data string
 	for _, selector := range selectors {
-		var levels []string
-		dataList = iterativeLoopHTML(doc.Selection, selector, levels, 1, urlMD5, "", dataList)  // iterative till first list
+		labels := strings.Split(selector, cm.LabelSeparate)
+		jIter := jsoniter.Get(body, labels[0])
+		jIter = iterativeJSON(jIter, labels[1: ])
 
-		if len(*dataList) > 0 {
+		data = jIter.ToString()
+		if len(data) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"htmlLabel":	selector,
-			}).Debug("parseHTMLStrImage success")
+				"jsonLabel":	selector,
+			}).Debug("parseDescJSON success")
 
 			break
 		}
 	}
 
 	// debug
-	if len(*dataList) <= 0 {
+	if len(data) <= 0 {
 		//  debug
 		log.WithFields(log.Fields{
-			"htmlLabel":	selectors,
-		}).Debug("html is empty by parseHTMLStrImage")
+			"jsonLabel":	selectors,
+		}).Debug("can not get desc by parseDescJSON")
 	}
 
-	return dataList
+	return data
 }
 
-// parseJSONStrImage for get string and download image by parse doc, return html
-func (s *SiteService) parseJSONStrImage(body []byte, pageURL string, imageDir string, selectors []string, listFlag bool) [][]string {
+// parseSetJSON for get string and download image by parse doc, return html
+func (s *SiteService) parseSetJSON(body []byte, pageURL string, selectors []string) [][]string {
 	var dataList [][]string
 	urlMD5 := ut.GetMD5(pageURL)
 
 	for _, selector := range selectors {
-		labels := strings.Split(selector, cm.LabelSeparate)
-		labelsNum := len(labels)
-		jsonIter := jsoniter.Get(body, labels[0])
-		for i := 1; i < labelsNum; i++ {  // cascade find label
-			jsonIter = jsonIter.Get(labels[i])
-		}
+		labelList := strings.Split(selector, cm.ListSeparate)
+		labels := strings.Split(labelList[0], cm.LabelSeparate)
+		jIter := jsoniter.Get(body, labels[0])
+		jIter = iterativeJSON(jIter, labels[1: ])
 
-		if !checkSelectionLegal(jsonIter, "json", selector, "parseJSONStrImage") {
-			continue
-		}
+		if len(labelList) > 1 {  // means labels has list
+			for i := 0; i < jIter.Size(); i++{
+				iter := jIter.Get(i)
+				if len(labelList[1]) > 0 {
+					iter = iterativeJSON(iter, strings.Split(labelList[1], cm.LabelSeparate))
+				}
 
-		if listFlag {
-			var data []string
-			data = append(data, urlMD5)
-			for i := 0; i < jsonIter.Size(); i++{
-				str := jsonIter.Get(i).ToString()
+				str := iter.ToString()
 				if len(str) <= 0 {
-					log.Debug("this jsonIter is empty by parseJSONStrImage")
+					log.Debug("this jsonIter is empty by parseSetJSON")
 
 					continue
 				}
 
-				str = s.ReplaceImagePaths(str, pageURL, imageDir)
-				data = append(data, str)
+				var data []string
+				data = append(data, urlMD5)
+				str = s.ReplaceImagePaths(str, pageURL)
+				data = append(data, str)  // add set meal data
+				dataList = append(dataList, data)
 			}
-			dataList = append(dataList, data)
 		} else {
-			str := jsonIter.ToString()
+			str := jIter.ToString()
 			if len(str) > 0 {
-				str = s.ReplaceImagePaths(str, pageURL, imageDir)
-				dataList = append(dataList, []string{str})
+				var data []string
+				data = append(data, urlMD5)
+				str = s.ReplaceImagePaths(str, pageURL)
+				data = append(data, str)  // add set meal data
+				dataList = append(dataList, data)
 			}
 		}
-
 
 		if len(dataList) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
 				"jsonLabel":	selector,
-			}).Debug("parseJSONStrImage success")
+			}).Debug("parseSetJSON success")
 
 			break
 		}
@@ -995,7 +1073,75 @@ func (s *SiteService) parseJSONStrImage(body []byte, pageURL string, imageDir st
 		//  debug
 		log.WithFields(log.Fields{
 			"jsonLabel":	selectors,
-		}).Debug("json is empty by parseJSONStrImage")
+		}).Debug("can not get set by parseSetJSON")
+	}
+
+	return dataList
+}
+
+// TODO: can not get spec title
+// parseSpecJSON for get string and download image by parse doc, return html
+func (s *SiteService) parseSpecJSON(body []byte, pageURL string, selectors []string) [][]string {
+	var dataList [][]string
+	urlMD5 := ut.GetMD5(pageURL)
+
+	for _, selector := range selectors {
+		labelList := strings.Split(selector, cm.ListSeparate)
+		labels := strings.Split(labelList[0], cm.LabelSeparate)
+		jIter := jsoniter.Get(body, labels[0])
+		jIter = iterativeJSON(jIter, labels[1: ])
+
+		if len(labelList) > 1 {  // means labels has list
+			for i := 0; i < jIter.Size(); i++{
+				iter := jIter.Get(i)
+				if len(labelList[1]) > 0 {
+					iter = iterativeJSON(iter, strings.Split(labelList[1], cm.LabelSeparate))
+				}
+
+				str := iter.ToString()
+				if len(str) <= 0 {
+					log.Debug("this jsonIter is empty by parseSpecJSON")
+
+					continue
+				}
+
+				var data []string
+				data = append(data, urlMD5)
+				data = append(data, "")  // add spec title
+				data = append(data, iter.Keys()[i])  // add spec mapping
+				str = s.ReplaceImagePaths(str, pageURL)
+				data = append(data, str)
+				dataList = append(dataList, data)
+			}
+		} else {
+			str := jIter.ToString()
+			if len(str) > 0 {
+				var data []string
+				data = append(data, urlMD5)
+				data = append(data, "")  // add spec title
+				data = append(data, jIter.Keys()[0])  // add spec mapping
+				str = s.ReplaceImagePaths(str, pageURL)
+				data = append(data, str)
+				dataList = append(dataList, data)
+			}
+		}
+
+		if len(dataList) > 0 {
+			//  debug
+			log.WithFields(log.Fields{
+				"jsonLabel":	selector,
+			}).Debug("parseSpecJSON success")
+
+			break
+		}
+	}
+
+	// debug
+	if len(dataList) <= 0 {
+		//  debug
+		log.WithFields(log.Fields{
+			"jsonLabel":	selectors,
+		}).Debug("can not get spec by parseSpecJSON")
 	}
 
 	return dataList
@@ -1063,27 +1209,4 @@ func (s *SiteService) TaskDownload(data *sc.DataBlock) {
 		"imageURL":		url,
 		"imageName":	name,
 	}).Debug("download image success by TaskDownload")
-}
-
-// dispatch for dispatch task
-func (s *SiteService) dispatch() {
-	for {
-		select {
-			// do task of parse url
-			case msg := <-s.downloadChan:
-				//ctrl := &sc.ControlInfo{
-				//	Name:    "http",  // must has value
-				//	CtrlNum: 30,  // the size of concurrent routine pool
-				//}
-				data := &sc.DataBlock{
-					Extra:   msg.Name,
-					Message: msg.URL,
-				}
-				s.scheduler.AddTask(sc.Task{
-					CtrlInfo:	nil,
-					Data:   	data,
-					DoTask: 	s.TaskDownload,
-				})
-		}
-	}
 }

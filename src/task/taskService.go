@@ -5,30 +5,30 @@
 package task
 
 import (
-	"context"
 	"fmt"
-	"io/ioutil"
-	"net/http"
 	"sync"
 	"sync/atomic"
+	"context"
+	"io/ioutil"
+	"net/http"
 
 	"github.com/astaxie/beego"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/micro/go-micro"
 	"github.com/micro/go-micro/broker"
 	"github.com/micro/go-micro/registry"
 	"github.com/micro/go-micro/registry/etcd"
 	"github.com/micro/go-micro/web"
 	"github.com/micro/go-plugins/broker/nsq"
+	jsoniter "github.com/json-iterator/go"
 	log "github.com/sirupsen/logrus"
 
-	cm "../common"
-	ds "../deliveryService"
-	hs "../httpService"
-	mc "../mysqlClient"
-	pb "../proto"
-	sc "../scheduler"
-	st "./sites"
+	cm "siteResService/src/common"
+	ds "siteResService/src/deliveryService"
+	hs "siteResService/src/httpService"
+	mc "siteResService/src/mysqlClient"
+	pb "siteResService/src/proto"
+	sc "siteResService/src/scheduler"
+	st "siteResService/src/task/sites"
 )
 
 // ServiceTask represents task service

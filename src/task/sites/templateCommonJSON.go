@@ -9,7 +9,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	cm "../../common"
+	cm "siteResService/src/common"
 )
 
 /**
@@ -44,16 +44,16 @@ func (s *SiteService) ParseInfoCommonJSON(pageURL string, body []byte, labels *c
 	pi.Title = s.ParseTitleJSON(body, labels.Title)
 
 	// price
-	pi.Price = s.ParseTitleJSON(body, labels.Price)
+	pi.Price = s.ParsePriceJSON(body, labels.Price)
 
 	// description
-	pi.Desc = s.parseJSONStrImage(body, pageURL, imageDir, labels.Desc, false)[0][0]
-
-	// specifications
-	pi.Spec = s.parseJSONStrImage(body, pageURL, imageDir, labels.Spec, true)
+	pi.Desc = s.parseDescJSON(body, labels.Desc)
 
 	// set meal
-	pi.Set = s.parseJSONStrImage(body, pageURL, imageDir, labels.Set, true)
+	pi.Set = s.parseSetJSON(body, pageURL, labels.Set)
+
+	// specifications
+	pi.Spec = s.parseSpecJSON(body, pageURL, labels.Spec)
 
 	return &pi
 }

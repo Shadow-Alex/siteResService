@@ -15,15 +15,14 @@ import (
 	"github.com/astaxie/beego"
 	log "github.com/sirupsen/logrus"
 
-	cm "./common"
-	ds "./deliveryService"
-	hs "./httpService"
-	mc "./mysqlClient"
-	sc "./scheduler"
-	sa "./standalone"
-	tk "./task"
-	ut "./util"
-	// rc "../redisClient"
+	cm "siteResService/src/common"
+	ds "siteResService/src/deliveryService"
+	hs "siteResService/src/httpService"
+	mc "siteResService/src/mysqlClient"
+	sc "siteResService/src/scheduler"
+	sa "siteResService/src/standalone"
+	tk "siteResService/src/task"
+	ut "siteResService/src/util"
 )
 
 
@@ -232,35 +231,35 @@ func dispatchStandAlone(server *Server) {
 func main() {
 	initCommonRes()
 
-	//runType := cm.RunTypeStandAlone
-	//if len(os.Args) > 3 {
-	//	log.Error("do not get args for source file, exit")
-	//
-	//	return
-	//}
-	//destSCR := os.Args[2]
-	//
-	//switch runType {
-	//case cm.RunTypeStandAlone:
-	//	startStandAloneServer(destSCR)
-	//case cm.RunTypeMicro:
-	//	startMicroServer()
-	//}
+	runType := cm.RunTypeStandAlone
+	if len(os.Args) < 3 {
+		log.Error("do not get args for source file, exit")
 
-	runType := cm.RunTypeMicro
-	destSCR := cm.DestStandAloneDB
-	if len(os.Args) > 1 {
-		runType = os.Args[1]
+		return
 	}
-	if len(os.Args) > 2 {
-		destSCR = os.Args[2]
-	}
+	destSCR := os.Args[2]
 
 	switch runType {
 	case cm.RunTypeStandAlone:
 		startStandAloneServer(destSCR)
-
 	case cm.RunTypeMicro:
 		startMicroServer()
 	}
+
+	//runType := cm.RunTypeMicro
+	//destSCR := cm.DestStandAloneDB
+	//if len(os.Args) > 1 {
+	//	runType = os.Args[1]
+	//}
+	//if len(os.Args) > 2 {
+	//	destSCR = os.Args[2]
+	//}
+	//
+	//switch runType {
+	//case cm.RunTypeStandAlone:
+	//	startStandAloneServer(destSCR)
+	//
+	//case cm.RunTypeMicro:
+	//	startMicroServer()
+	//}
 }

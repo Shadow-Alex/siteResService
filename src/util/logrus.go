@@ -16,7 +16,7 @@ import (
 	"github.com/rifflock/lfshook"
 	"github.com/sirupsen/logrus"
 
-	cm "../common"
+	cm "siteResService/src/common"
 )
 
 // InitLogrus init and config logrus and return, it gets parameter from conf/app.conf about:
