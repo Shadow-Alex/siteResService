@@ -62,7 +62,7 @@ func (s *SiteService) ParseInfoCustomHTML1(pageURL string) *cm.ProInfo {
 
 	// description
 	pi.Desc, _ = doc.Find("#tab1").Html()
-	pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL)
+	//pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL)
 
 	// specifications
 	//pi.Spec, _ = doc.Find("#tab3").Html()

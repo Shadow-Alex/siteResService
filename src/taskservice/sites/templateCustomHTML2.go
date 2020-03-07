@@ -11,7 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	cm "siteResService/src/common"
-	hs "siteResService/src/httpService"
+	hs "siteResService/src/httpservice"
 )
 
 // ParseInfoCustomHTML2 for custom html template returns pointer of ProInfo instance
@@ -96,7 +96,7 @@ func (s *SiteService) parse1(pageURL string) *cm.ProInfo {
 			pi.Desc, _ = selection.Html()
 		}
 	})
-	pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL)
+	//pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL)
 
 	return &pi
 }

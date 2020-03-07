@@ -28,7 +28,7 @@ import (
 	ut "siteResService/src/util"
 )
 
-// ServiceHTTP for http request
+// ServiceHTTP represents http request
 type ServiceHTTP struct {
 	wd					*selenium.WebDriver
 	wdLastRestartTime	time.Time  // for restart web driver

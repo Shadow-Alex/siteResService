@@ -5,34 +5,34 @@
 package standalone
 
 import (
-	"os"
-	"os/exec"
-	"sync"
-	"time"
-	"strconv"
-	"strings"
 	"bufio"
 	"encoding/csv"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/astaxie/beego/orm"
 	log "github.com/sirupsen/logrus"
 
-	mc "siteResService/src/mysqlClient"
-	sc "siteResService/src/scheduler"
-	tk "siteResService/src/task"
 	cm "siteResService/src/common"
+	mc "siteResService/src/mysqlclient"
+	sc "siteResService/src/scheduler"
 	ut "siteResService/src/util"
 )
 
 
-// StandAlone for stand alone running
+// StandAlone represents stand alone running
 type StandAlone struct {
 	db 				*mc.MySQLClient
-	task			*tk.ServiceTask
+	subChan			*chan string
+	subCounter		*uint64
 	siteResFile		*os.File  // store site resource data, not include spec and set
 	siteSpecFile	*os.File  // store site specifications data
-	siteSetFile		*os.File  // store site set meal data
+	siteGoodFile		*os.File  // store site set meal data
 	lastOffset      int64  // store last offset when last query
 	lastStartTime	time.Time  // store last start time in query period
 	lastTimeStamp	int64  // store last time in timestamp
@@ -42,10 +42,10 @@ var instance *StandAlone
 var initStandAloneOnce sync.Once
 
 // GetStandAloneInstance returns StandAlone instance pointer
-func GetStandAloneInstance(db *mc.MySQLClient, task *tk.ServiceTask) *StandAlone {
+func GetStandAloneInstance(db *mc.MySQLClient, subChan *chan string, subCounter *uint64) *StandAlone {
 	initStandAloneOnce.Do(func() {
 		instance = new(StandAlone)
-		instance.init(db, task)
+		instance.init(db, subChan, subCounter)
 
 		log.Info("init stand alone site resource service instance success...")
 	})
@@ -54,11 +54,12 @@ func GetStandAloneInstance(db *mc.MySQLClient, task *tk.ServiceTask) *StandAlone
 }
 
 // init stand alone model
-func (sa *StandAlone) init(db *mc.MySQLClient, task *tk.ServiceTask) {
+func (sa *StandAlone) init(db *mc.MySQLClient, subChan *chan string, subCounter *uint64) {
 	sa.db = db
+	sa.subChan = subChan
+	sa.subCounter = subCounter
 	sa.lastOffset = 0
 	sa.lastTimeStamp = 0
-	sa.task = task
 
 	sa.initSiteResultFile()  // init csv result file
 }
@@ -88,7 +89,7 @@ func (sa *StandAlone) addInfoToChan(items *[]orm.Params) int64 {
 		}
 
 		landingURL := strings.TrimSpace(item["LandingUrl"].(string))
-		sa.task.SubChan <- landingURL
+		*sa.subChan <- landingURL
 
 		// only for debug
 		log.WithFields(log.Fields{
@@ -165,11 +166,11 @@ func (sa *StandAlone) initSiteResultFile() {
 	titles := []string{"pageURLMD5", "pageURL", "creatTime", "coverInJson", "title", "price", "descriptions", "template"}
 	sa.siteResFile = initSiteFile(cm.SiteResourceFile, titles)
 	// init site specifications file
-	titles = []string{"pageURLMD5", "type", "mapping", "specifications"}
+	titles = []string{"pageURLMD5", "type", "mapping", "specText","specImage"}
 	sa.siteSpecFile = initSiteFile(cm.SiteSpecFile, titles)
 	// init site set meals file
-	titles = []string{"pageURLMD5", "setMeal"}
-	sa.siteSetFile = initSiteFile(cm.SiteSetFile, titles)
+	titles = []string{"pageURLMD5", "goodText", "goodImage"}
+	sa.siteGoodFile = initSiteFile(cm.SiteGoodFile, titles)
 }
 
 // closeFileTGT for close target file
@@ -184,8 +185,8 @@ func (sa *StandAlone) CloseFileTGT() {
 
 		log.Info("siteSpecFile close success...")
 	}
-	if sa.siteSetFile != nil {
-		sa.siteSetFile.Close()
+	if sa.siteGoodFile != nil {
+		sa.siteGoodFile.Close()
 
 		log.Info("siteSetFile close success...")
 	}
@@ -206,7 +207,7 @@ func (sa *StandAlone) GetPageURLFromFile(fileSCR string) {
 	for r.Scan() {
 		// Read each record from csv file
 		pageURL := r.Text()
-		sa.task.SubChan <- pageURL
+		*sa.subChan <- pageURL
 
 		// only for debug
 		log.WithFields(log.Fields{
@@ -288,7 +289,7 @@ func (sa *StandAlone) TaskSaveResultToFile(data *sc.DataBlock) {
 	w = csv.NewWriter(sa.siteSpecFile)
 	writeCSVFile(w, proInfo.Spec)
 
-	w = csv.NewWriter(sa.siteSetFile)
+	w = csv.NewWriter(sa.siteGoodFile)
 	writeCSVFile(w, proInfo.Set)
 
 	// chmod
@@ -303,7 +304,7 @@ func (sa *StandAlone) TaskSaveResultToFile(data *sc.DataBlock) {
 func (sa *StandAlone) ShowStandaloneADV() {
 	for {
 		select {
-		case msg := <- sa.task.SubChan:
+		case msg := <- *sa.subChan:
 			log.WithFields(log.Fields{
 				"pageURL":	msg,
 			}).Info("handle result")

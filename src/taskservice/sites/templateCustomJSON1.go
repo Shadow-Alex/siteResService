@@ -11,7 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	cm "siteResService/src/common"
-	hs "siteResService/src/httpService"
+	hs "siteResService/src/httpservice"
 )
 
 /**
@@ -77,7 +77,7 @@ func (s *SiteService) ParseInfoCustomJSON1(pageURL string) *cm.ProInfo {
 
 	// description
 	pi.Desc = jsoniter.Get(resp.Body, "info", "content").ToString()
-	pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL)
+	//pi.Desc = s.ReplaceImagePaths(pi.Desc, pageURL)
 
 	// specifications
 	//pi.Spec, _ = ""

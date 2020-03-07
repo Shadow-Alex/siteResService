@@ -1,3 +1,7 @@
+/*
+  Package common for common define
+*/
+
 package common
 
 import (
@@ -11,14 +15,17 @@ const (
 	// RunTypeStandAlone for running service alone
 	RunTypeStandAlone = "standalone"
 
+	// Version for service release version
+	Version = "v1"
+
 	// DestStandAloneDB for running service alone and get page id from db
 	DestStandAloneDB = "db"
 	// siteResourceFile for name of site resource file
 	SiteResourceFile = "siteResource.csv"
 	// SiteSpecFile for name of specifications file
 	SiteSpecFile = "siteSpecifications.csv"
-	// SiteSetFile for name of set meal file
-	SiteSetFile = "siteSetMeal.csv"
+	// SiteGoodFile for name of set meal file
+	SiteGoodFile = "siteGoodsInfo.csv"
 
 	// HTMLFormat for distinguish the method of parsing page by using html
 	HTMLFormat = "html"
@@ -72,6 +79,10 @@ const (
 	// SchedulerTaskQueueSize for scheduler task queue size
 	SchedulerTaskQueueSize = 10
 
+	// UseMicro for use micro service
+	UseMicro = false
+	// UseWeb for use web service
+	UseWeb = true
 	// MicroServiceName for micro service name
 	MicroServiceName = "go.micro.service"
 	// MicroWebServiceName for micro web service name
@@ -186,7 +197,7 @@ type LabelsParse struct {
 	Title		[]string
 	Price		[]string
 	Desc		[]string
-	Set			[]string
+	Good		[]string
 	Spec		[]string
 }
 

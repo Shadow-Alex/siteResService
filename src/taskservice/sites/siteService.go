@@ -5,24 +5,25 @@
 package sites
 
 import (
-	"os"
+	"encoding/csv"
+	"fmt"
 	"io"
 	"io/ioutil"
-	"fmt"
-	"sync"
-	"time"
+	"math"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
-	"encoding/csv"
+	"sync"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	jsoniter "github.com/json-iterator/go"
 	log "github.com/sirupsen/logrus"
 
 	cm "siteResService/src/common"
-	hs "siteResService/src/httpService"
+	hs "siteResService/src/httpservice"
 	sc "siteResService/src/scheduler"
 	ut "siteResService/src/util"
 )
@@ -36,7 +37,8 @@ type SiteService struct {
 var instance *SiteService
 var initTaskOnce sync.Once
 var rootPath string
-var setKVMatch *regexp.Regexp
+var goodKVMatch *regexp.Regexp
+var goodValueMatch *regexp.Regexp
 
 // GetSiteServiceInstance return siteService pointer instance
 func GetSiteServiceInstance() *SiteService {
@@ -67,7 +69,8 @@ func (s *SiteService) init () {
 	s.initSitesLabelMaps()
 
 	// regexp for get style and value
-	setKVMatch = regexp.MustCompile(`\{(.*)\}`)
+	goodKVMatch = regexp.MustCompile(`\{(.*)\}`)
+	goodValueMatch = regexp.MustCompile(`\((.*)\)`)
 }
 
 // note !!!
@@ -88,7 +91,7 @@ func (s *SiteService) init () {
 // and use ";" to indicates that the previous layer is list, ";" only use for cover, title, price, and only use once, for example:
 // "data|products|covers;name" means to get value in data: {product:{covers:[name:value,name:value]}}
 // addSiteResource for add site resource into SitesLabelMaps templates,
-// the sequence of params []string : domain,character,order,cover,title,price,desc,spec,set,pageURL,type
+// the sequence of params []string : domain,character,order,cover,title,price,desc,spec,goods,pageURL,type
 func (s *SiteService) addSiteResource(record []string) {
 	domain := record[0]
 	if len(domain) <= 0 {
@@ -119,9 +122,9 @@ func (s *SiteService) addSiteResource(record []string) {
 	if len(record[6]) <= 0 || record[6] == "" {
 		descLabels = []string{}
 	}
-	setLabels := strings.Split(record[7], "+")
+	goodLabels := strings.Split(record[7], "+")
 	if len(record[7]) <= 0 || record[7] == "" {
-		setLabels = []string{}
+		goodLabels = []string{}
 	}
 	specLabels := strings.Split(record[8], "+")
 	if len(record[8]) <= 0 || record[8] == "" {
@@ -145,8 +148,8 @@ func (s *SiteService) addSiteResource(record []string) {
 		for _, desc := range descLabels {
 			lab.Desc = append(lab.Desc, desc)
 		}
-		for _, set := range setLabels {
-			lab.Set = append(lab.Set, set)
+		for _, good := range goodLabels {
+			lab.Good = append(lab.Good, good)
 		}
 		for _, spec := range specLabels {
 			lab.Spec = append(lab.Spec, spec)
@@ -163,7 +166,7 @@ func (s *SiteService) addSiteResource(record []string) {
 		Title:		titleLabels,
 		Price:		priceLabels,
 		Desc:		descLabels,
-		Set:		setLabels,
+		Good:		goodLabels,
 		Spec:		specLabels,
 	}
 	s.SitesLabelMaps.Store(domainMD5, labels)
@@ -230,9 +233,9 @@ func (s *SiteService) testFunc() {
 	//	Price:		[]string{`.time-up-title`},
 	//	Desc:		[]string{`#goods-detail`},
 	//	Spec:		[]string{`.time-up-text`},
-	//	Set:		[]string{`.select-size`},
+	//	Good:		[]string{`.select-size`},
 	//}
-	// the sequence of params []string : domain,character,order,cover,title,price,desc,spec,set,pageURL,type
+	// the sequence of params []string : domain,character,order,cover,title,price,desc,spec,goods,pageURL,type
 	s.addSiteResource([]string{"www.yuanddd.com","web","div[class=submit-btn-cont]",".el-carousel__item",
 			".time-up-text",".time-up-title","#goods-detail",".time-up-text",".select-size",
 			"https://www.yuanddd.com/tzbi3?a=twwj0113&c=f&b=john","java script"})
@@ -245,7 +248,7 @@ func (s *SiteService) testFunc() {
 	//	Price:		[]string{`.price`},
 	//	Desc:		[]string{`.box-content`},
 	//	Spec:		[]string{`#big_1|.con_ul|.con`},
-	//	Set:		[]string{`.rows-id-params-select`},
+	//	Good:		[]string{`.rows-id-params-select`},
 	//}
 	s.addSiteResource([]string{"wangbada.com","html",".foot-nav-2|a",".box-image",
 		".title|h1",".price",".box-content","#big_1|.con_ul|.con",".rows-id-params-select",
@@ -390,9 +393,10 @@ func generateImageName(url string, rename string) string {
 	return imageName
 }
 
-// ReplaceImagePaths returns description of image
-func (s *SiteService) ReplaceImagePaths(desc string, pageURL string) string {
-	resourceMap := make(map[string]string)
+// replaceImagePaths returns list of description images
+func (s *SiteService) replaceImagePaths(desc string, pageURL string) []string {
+	var images []string
+	//resourceMap := make(map[string]string)
 	docDesc, _ := goquery.NewDocumentFromReader(strings.NewReader(desc))
 	docDesc.Find("img").Each(func(i int, selection *goquery.Selection) {
 		imageSrc, ok := selection.Attr("data-original")
@@ -404,8 +408,9 @@ func (s *SiteService) ReplaceImagePaths(desc string, pageURL string) string {
 		}
 
 		imageURL := GetResourceURL(imageSrc, pageURL)
-		resourceMap[imageSrc] = imageURL
+		images = append(images, imageURL)
 
+		//resourceMap[imageSrc] = imageURL
 		//imageName := generateImageName(imageURL, "")
 		//downloadInfo := cm.DownLoadInfo{
 		//	URL:	imageURL,
@@ -417,11 +422,36 @@ func (s *SiteService) ReplaceImagePaths(desc string, pageURL string) string {
 	})
 
 	docDesc.Find("video").Each(func(i int, selection *goquery.Selection) {
-		videoSrc, okS := selection.Attr("src")
-		if okS && len(videoSrc) > 0 {
-			vURL := GetResourceURL(videoSrc, pageURL)
-			resourceMap[videoSrc] = vURL
+		var videos []string
+		videoSrc, ok := selection.Attr("src")
+		if !ok && len(videoSrc) <= 0 {
+			videoSrc, ok = selection.Attr("poster")
+			if !ok && len(videoSrc) <= 0 {
+				selection.Find("source").Each(func(j int, selection *goquery.Selection) {
+					videoSrc, ok = selection.Attr("src")
+					if !ok && len(videoSrc) <= 0 {
+						return
+					}
+					videos = append(videos, videoSrc)
+				})
 
+				if len(videoSrc) <= 0 && len(videos) <= 0 {
+					return
+				}
+			}
+		}
+
+		if len(videoSrc) > 0 {
+			vURL := GetResourceURL(videoSrc, pageURL)
+			images = append(images, vURL)
+		}
+		for _, video := range videos {
+			vURL := GetResourceURL(video, pageURL)
+			images = append(images, vURL)
+		}
+
+
+			//resourceMap[videoSrc] = vURL
 			//imageName := generateImageName(vURL, "")
 			//downloadInfo := cm.DownLoadInfo{
 			//	URL:	vURL,
@@ -430,13 +460,14 @@ func (s *SiteService) ReplaceImagePaths(desc string, pageURL string) string {
 			//s.downloadChan <- downloadInfo  // push to download task, asynchronous download
 			//imageName, okD := s.http.DownloadImage(vURL, imageDir, "")
 			//resourceMap[videoSrc] = imageDir + "/" + imageName
-		}
+		//}
 
-		posterSrc, okP := selection.Attr("poster")
-		if okP && len(posterSrc) > 0 {
-			imgURL := GetResourceURL(posterSrc, pageURL)
-			resourceMap[posterSrc] = imgURL
+		//posterSrc, okP := selection.Attr("poster")
+		//if okP && len(posterSrc) > 0 {
+		//	imgURL := GetResourceURL(posterSrc, pageURL)
+		//	images = append(images, imgURL)
 
+			//resourceMap[posterSrc] = imgURL
 			//imageName := generateImageName(imgURL, "")
 			//downloadInfo := cm.DownLoadInfo{
 			//	URL:	imgURL,
@@ -445,14 +476,15 @@ func (s *SiteService) ReplaceImagePaths(desc string, pageURL string) string {
 			//s.downloadChan <- downloadInfo  // push to download task, asynchronous download
 			//imageName, okD := s.http.DownloadImage(imgURL, imageDir, "")
 			//resourceMap[posterSrc] = imageDir + "/" + imageName
-		}
+		//}
+		//
+		//selection.Find("source").Each(func(j int, selection *goquery.Selection) {
+		//	sourceSrc, ok := selection.Attr("src")
+		//	if ok && len(sourceSrc) > 0 {
+		//		vURL := GetResourceURL(sourceSrc, pageURL)
+		//		images = append(images, vURL)
 
-		selection.Find("source").Each(func(j int, selection *goquery.Selection) {
-			videoSrc, ok := selection.Attr("src")
-			if ok && len(videoSrc) > 0 {
-				vURL := GetResourceURL(videoSrc, pageURL)
-				resourceMap[videoSrc] = vURL
-
+				//resourceMap[sourceSrc] = vURL
 				//imageName := generateImageName(vURL, "")
 				//downloadInfo := cm.DownLoadInfo{
 				//	URL:	vURL,
@@ -460,18 +492,19 @@ func (s *SiteService) ReplaceImagePaths(desc string, pageURL string) string {
 				//}
 				//s.downloadChan <- downloadInfo  // push to download task, asynchronous download
 				//imageName, okD := s.http.DownloadImage(vURL, imageDir, "")
-				//resourceMap[videoSrc] = imageDir + "/" + imageName
-			}
-		})
+				//resourceMap[sourceSrc] = imageDir + "/" + imageName
+		//	}
+		//})
 	})
 
-	for k, v := range resourceMap {
-		//v = strings.ReplaceAll(v, cm.ImageDir, cm.ImagePrefixDefault)
-		desc = strings.ReplaceAll(desc, k, v)
-	}
+	// replace image path to image url in html
+	//for k, v := range resourceMap {
+	//	v = strings.ReplaceAll(v, cm.ImageDir, cm.ImagePrefixDefault)
+	//	desc = strings.ReplaceAll(desc, k, v)
+	//}
 
 	//logs.Info(desc)
-	return desc
+	return images
 }
 
 // checkSelectionLegal return true if selection is not empty
@@ -490,7 +523,6 @@ func checkSelectionLegal(selection interface{}, mode string, labels string, func
 
 		return false
 	}
-
 
 	return true
 }
@@ -528,26 +560,36 @@ func (s *SiteService) parseCoverImages(selection *goquery.Selection, pageURL str
 	return images
 }
 
-// ParseCoverImagesHTML parse by html, returns list of cover ImageInfo instance
-func (s *SiteService) ParseCoverImagesHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) []string {
+// parseCoverImagesHTML parse by html, returns list of cover ImageInfo instance
+func (s *SiteService) parseCoverImagesHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) []string {
 	//var images []cm.ImageInfo
-	var images []string
 	for _, selector := range selectors {
-		labels := strings.Split(selector, cm.LabelSeparate)
-		selection := doc.Find(labels[0])
-		for i := 1; i < len(labels); i++ {  // cascade find label
-			selection = selection.Find(labels[i])
-		}
-
-		if !checkSelectionLegal(selection, "html", selector, "ParseCoverImagesHTML") {
+		labelList := strings.Split(selector, cm.ListSeparate)
+		selection := iterativeHTML(doc.Selection, labelList[0])  // get first
+		if !checkSelectionLegal(selection, "html", selector, "parseCoverImagesHTML") {
 			continue
 		}
 
-		images = s.parseCoverImages(selection, pageURL, imageDir)
+		var images []string
+		selection.Each(func(i int, selection1 *goquery.Selection) {
+			selc := selection1
+			if len(labelList) > 1 && len(labelList[1]) > 0 {
+				selc = iterativeHTML(selection1, labelList[1]) // get first
+				if !checkSelectionLegal(selc, "html", selector, "parseCoverImagesHTML") {
+					return
+				}
+			}
+
+			imgs := s.parseCoverImages(selc, pageURL, imageDir)
+			for j := 0; j < len(imgs); j++ {
+				images = append(images, imgs[j])
+			}
+		})
+
 		if len(images) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"coverLabel":	selector,
+				"selector":	selector,
 			}).Debug("ParseCoverImagesHTML success")
 
 			return images
@@ -556,35 +598,47 @@ func (s *SiteService) ParseCoverImagesHTML(doc *goquery.Document, pageURL string
 
 	//  debug
 	log.WithFields(log.Fields{
-		"coverLabel":	selectors,
+		"selectors":	selectors,
 	}).Debug("can not get cover by ParseCoverImagesHTML")
 
-	return images
+	return []string{}
 }
 
-// ParseCoverImagesJSON parse by json, returns list of cover ImageInfo instance
-func (s *SiteService) ParseCoverImagesJSON(body []byte, pageURL string, imageDir string, selectors []string) []string {
+// iterativeJSON for iterative locate selection return located pointer of jsoniter.Any
+func iterativeJSON(jIter jsoniter.Any, labels []string) jsoniter.Any {
+	for i := 0; i < len(labels); i++ {  // cascade find label
+		jIter = jIter.Get(labels[i])
+		if !checkSelectionLegal(jIter, "json", strings.Join(labels, "|"), "iterativeJSON") {
+			break
+		}
+	}
+
+	return jIter
+}
+
+// parseCoverImagesJSON parse by json, returns list of cover ImageInfo instance
+func (s *SiteService) parseCoverImagesJSON(body []byte, pageURL string, imageDir string, selectors []string) []string {
 	//var images []cm.ImageInfo
 	var images []string
 	for _, selector := range selectors {
 		labelList := strings.Split(selector, cm.ListSeparate)
 		labels := strings.Split(labelList[0], cm.LabelSeparate)
-		labelsNum := len(labels)
-		jsonIter := jsoniter.Get(body, labels[0])
-		for i := 1; i < labelsNum; i++ {  // cascade find label
-			jsonIter = jsonIter.Get(labels[i])
-		}
-
-		if !checkSelectionLegal(jsonIter, "json", selector, "ParseCoverImagesJSON") {
+		jIter := jsoniter.Get(body, labels[0])
+		jIter = iterativeJSON(jIter, labels[1: ])
+		if !checkSelectionLegal(jIter, "json", selector, "ParseCoverImagesJSON") {
 			continue
 		}
 
 		var imageURL string
-		if len(labelList) > 1 { // if contains ";", means labelList[1] indicates that the previous layer is list
-			iterNum := jsonIter.Size()
+		if len(labelList) > 1 && len(labelList[1]) > 0 { // if contains ";", means labelList[1] indicates that the previous layer is list
+			iterNum := jIter.Size()
 			for i := 0; i < iterNum; i++ {
-				imageURL = jsonIter.Get(i).Get(labelList[1]).ToString()
-				imageURL = GetResourceURL(imageURL, pageURL)
+				iter := iterativeJSON(jIter.Get(i), strings.Split(labelList[1], cm.LabelSeparate))
+				if !checkSelectionLegal(iter, "json", selector, "parseTitleJSON") {
+					continue
+				}
+
+				imageURL = GetResourceURL(iter.ToString(), pageURL)
 				images = append(images, imageURL)
 
 				//imageName := generateImageName(imageURL, "")
@@ -596,9 +650,8 @@ func (s *SiteService) ParseCoverImagesJSON(body []byte, pageURL string, imageDir
 				//imageName, ok := s.http.DownloadImage(imageURL, imageDir, "")
 				//images = append(images, NewImage(imageURL, imageName, imageDir, true))
 			}
-		} else {
-			imageURL = jsonIter.ToString()  // if do not contains ";" means do not has list layer
-			imageURL = GetResourceURL(imageURL, pageURL)
+		} else {  // if do not contains ";" means do not has list layer
+			imageURL = GetResourceURL(jIter.ToString(), pageURL)
 			images = append(images, imageURL)
 
 			//imageName := generateImageName(imageURL, "")
@@ -614,7 +667,7 @@ func (s *SiteService) ParseCoverImagesJSON(body []byte, pageURL string, imageDir
 		if len(images) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"coverLabel":	selector,
+				"selector":	selector,
 			}).Debug("ParseCoverImagesJSON success")
 
 			return images
@@ -623,31 +676,44 @@ func (s *SiteService) ParseCoverImagesJSON(body []byte, pageURL string, imageDir
 
 	//  debug
 	log.WithFields(log.Fields{
-		"coverLabel":	selectors,
+		"selectors":	selectors,
 	}).Debug("can not get cover by ParseCoverImagesJSON")
 
 	return images
 }
 
-// ParseTitleHTML parse by html, returns title after parse
-func (s *SiteService) ParseTitleHTML(doc *goquery.Document, selectors []string) string {
+// parseTitleHTML parse by html, returns title after parse
+func (s *SiteService) parseTitleHTML(doc *goquery.Document, selectors []string) string {
 	for _, selector := range selectors {
-		labels := strings.Split(selector, cm.LabelSeparate)
-		selection := doc.Find(labels[0])
-		for i := 1; i < len(labels); i++ {  // cascade find label
-			selection = selection.Find(labels[i])
-		}
-
-		if !checkSelectionLegal(selection, "html", selector, "ParseTitleHTML") {
+		labelList := strings.Split(selector, cm.ListSeparate)
+		selection := iterativeHTML(doc.Selection, labelList[0])  // get first
+		if !checkSelectionLegal(selection, "html", selector, "parseTitleHTML") {
 			continue
 		}
 
-		title := selection.Text()
+		var title string
+		var titles []string
+		selection.Each(func(i int, selection1 *goquery.Selection) {
+			selc := selection1
+			if len(labelList) > 1 && len(labelList[1]) > 0 {
+				selc = iterativeHTML(selection1, labelList[1]) // get first
+				if !checkSelectionLegal(selc, "html", selector, "parseTitleHTML") {
+					return
+				}
+			}
+
+			text := strings.TrimSpace(selc.Text())
+			if len(text) > 0 {
+				titles = append(titles, text)
+			}
+		})
+		title = strings.Join(titles, ",")  // "," for separate each title
+
 		if len(title) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"titleLabel":	selector,
-			}).Debug("ParseTitleHTML success")
+				"selector":	selector,
+			}).Debug("parseTitleHTML success")
 
 			return title
 		}
@@ -655,137 +721,160 @@ func (s *SiteService) ParseTitleHTML(doc *goquery.Document, selectors []string) 
 
 	//  debug
 	log.WithFields(log.Fields{
-		"titleLabel":	selectors,
+		"selectors":	selectors,
 	}).Debug("can not get title by ParseTitleHTML")
 
 	return ""
 }
 
-// ParseTitleJSON parse by json, returns title after parse
-func (s *SiteService) ParseTitleJSON(body []byte, selectors []string) string {
+// parseTitleJSON parse by json, returns title after parse
+func (s *SiteService) parseTitleJSON(body []byte, selectors []string) string {
 	for _, selector := range selectors {
 		labelList := strings.Split(selector, cm.ListSeparate)
 		labels := strings.Split(labelList[0], cm.LabelSeparate)
-		labelsNum := len(labels)
-		jsonIter := jsoniter.Get(body, labels[0])
-		for i := 1; i < labelsNum; i++ {  // cascade find label
-			jsonIter = jsonIter.Get(labels[i])
-		}
-
-		if !checkSelectionLegal(jsonIter, "json", selector, "ParseTitleJSON") {
+		jIter := jsoniter.Get(body, labels[0])
+		jIter = iterativeJSON(jIter, labels[1: ])
+		if !checkSelectionLegal(jIter, "json", selector, "ParseTitleJSON") {
 			continue
 		}
 
-		var finalTitle string  // final title
-		var titleList []string  // if contains multi title
-		if len(labelList) > 1 {  // if contains "#", means labelList[1] indicates that the previous layer is list
-			iterNum := jsonIter.Size()
+		var title string  // final title
+		var titles []string  // if contains multi title
+		if len(labelList) > 1 && len(labelList[1]) > 0 {  // if contains ";", means labelList[1] indicates that the previous layer is list
+			iterNum := jIter.Size()
 			for i := 0; i < iterNum; i++ {
-				titleList = append(titleList, jsonIter.Get(i).Get(labelList[1]).ToString())
+				iter := iterativeJSON(jIter.Get(i), strings.Split(labelList[1], cm.LabelSeparate))
+				if !checkSelectionLegal(iter, "json", selector, "parseTitleJSON") {
+					continue
+				}
+
+				titles = append(titles, strings.TrimSpace(iter.ToString()))
 			}
-			finalTitle = strings.Join(titleList, ",")  // "," for separate each title
+			title = strings.Join(titles, ",")  // "," for separate each title
 		} else {
-			finalTitle = jsonIter.ToString()
+			title = strings.TrimSpace(jIter.ToString())
 		}
 
-		if len(finalTitle) > 0 {
+		if len(title) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"titleLabel":	selector,
+				"selector":	selector,
 			}).Debug("ParseTitleJSON success")
 
-			return finalTitle
+			return title
 		}
 	}
 
 	//  debug
 	log.WithFields(log.Fields{
-		"titleLabel":	selectors,
+		"selectors":	selectors,
 	}).Debug("can not get title by ParseTitleJSON")
 
 	return ""
 }
 
-// ParsePriceHTML parse by html, returns price after parse
-func (s *SiteService) ParsePriceHTML(doc *goquery.Document, selectors []string) string {
+// parsePriceHTML parse by html, returns price after parse
+func (s *SiteService) parsePriceHTML(doc *goquery.Document, selectors []string) string {
 	for _, selector := range selectors {
-		labels := strings.Split(selector, cm.LabelSeparate)
-		selection := doc.Find(labels[0])
-		for i := 1; i < len(labels); i++ {  // cascade find label
-			selection = selection.Find(labels[i])
-		}
-
-		if !checkSelectionLegal(selection, "html", selector, "ParsePriceHTML") {
+		labelList := strings.Split(selector, cm.ListSeparate)
+		selection := iterativeHTML(doc.Selection, labelList[0])  // get first
+		if !checkSelectionLegal(selection, "html", selector, "parsePriceHTML") {
 			continue
 		}
 
-		str := selection.Text()
-		str = strings.ReplaceAll(str, "\n", "")
-		str = strings.ReplaceAll(str, "\t", "")
-		str = strings.ReplaceAll(str, "\r", "")
-		str = strings.TrimSpace(str)
-		if len(str) > 0 {
+		var price string
+		var prices []string
+		selection.Each(func(i int, selection1 *goquery.Selection) {
+			selc := selection1
+			if len(labelList) > 1 && len(labelList[1]) > 0 {
+				selc = iterativeHTML(selection1, labelList[1]) // get first
+				if !checkSelectionLegal(selc, "html", selector, "parsePriceHTML") {
+					return
+				}
+			}
+
+			text := strings.TrimSpace(selc.Text())
+			if len(text) > 0 {
+				prices = append(prices, text)
+			}
+		})
+		price = strings.Join(prices, ",")  // "," for separate each title
+
+		if len(price) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"priceLabel":	selector,
+				"selector":	selector,
 			}).Debug("ParsePriceHTML success")
 
-			return str
+			return price
 		}
 	}
 
 	//  debug
 	log.WithFields(log.Fields{
-		"priceLabel":	selectors,
+		"selectors":	selectors,
 	}).Debug("can not get price by ParsePriceHTML")
 
 	return ""
 }
 
-// ParsePriceJSON parse by json, returns price after parse
-func (s *SiteService) ParsePriceJSON(body []byte, selectors []string) string {
+// parsePriceJSON parse by json, returns price after parse
+func (s *SiteService) parsePriceJSON(body []byte, selectors []string) string {
 	for _, selector := range selectors {
 		labelList := strings.Split(selector, cm.ListSeparate)
 		labels := strings.Split(labelList[0], cm.LabelSeparate)
-		labelsNum := len(labels)
-		jsonIter := jsoniter.Get(body, labels[0])
-		for i := 1; i < labelsNum; i++ {  // cascade find label
-			jsonIter = jsonIter.Get(labels[i])
-		}
-
-		if !checkSelectionLegal(jsonIter, "json", selector, "ParsePriceJSON") {
+		jIter := jsoniter.Get(body, labels[0])
+		jIter = iterativeJSON(jIter, labels[1: ])
+		if !checkSelectionLegal(jIter, "json", selector, "ParsePriceJSON") {
 			continue
 		}
 
-		var finalPrice string  // final price
-		var priceList []string  // if contains multi price
-		if len(labelList) > 1 {  // if contains "#", means labelList[1] indicates that the previous layer is list
-			iterNum := jsonIter.Size()
+		var priceHTMLs []string  // if contains multi price
+		if len(labelList) > 1 && len(labelList[1]) > 0 {  // if contains ";", means labelList[1] indicates that the previous layer is list
+			iterNum := jIter.Size()
 			for i := 0; i < iterNum; i++ {
-				priceList = append(priceList, jsonIter.Get(i).Get(labelList[1]).ToString())
+				iter := iterativeJSON(jIter.Get(i), strings.Split(labelList[1], cm.LabelSeparate))
+				if !checkSelectionLegal(iter, "json", selector, "ParsePriceJSON") {
+					continue
+				}
+
+				priceHTMLs = append(priceHTMLs, iter.ToString())
 			}
-			finalPrice = strings.Join(priceList, ",")  // "," for separate each price
 		} else {
-			finalPrice = jsonIter.ToString()
+			priceHTMLs = append(priceHTMLs, jIter.ToString())
 		}
 
-		finalPrice = strings.ReplaceAll(finalPrice, "\n", "")
-		finalPrice = strings.ReplaceAll(finalPrice, "\t", "")
-		finalPrice = strings.ReplaceAll(finalPrice, "\r", "")
-		finalPrice = strings.TrimSpace(finalPrice)
-		if len(finalPrice) > 0 {
+		var prices []string  // final price
+		for i := 0; i < len(priceHTMLs); i++ {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(priceHTMLs[i]))
+			if err != nil {
+				log.WithFields(log.Fields{
+					"html":	priceHTMLs[i],
+				}).Debug("can not parse string to html by ParsePriceJSON")
+
+				continue
+			}
+
+			text := strings.TrimSpace(doc.Text())
+			if len(text) > 0 {
+				prices = append(prices, text)
+			}
+		}
+
+		price := strings.Join(prices, ",")  // "," for separate each title
+		if len(price) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"priceLabel":	selector,
+				"selector":	selector,
 			}).Debug("ParsePriceJSON success")
 
-			return finalPrice
+			return price
 		}
 	}
 
 	//  debug
 	log.WithFields(log.Fields{
-		"priceLabel":	selectors,
+		"selectors":	selectors,
 	}).Debug("can not get price by ParsePriceJSON")
 
 	return ""
@@ -804,91 +893,269 @@ func iterativeHTML(selection *goquery.Selection, selector string) *goquery.Selec
 	return selection
 }
 
-// parseDescHTML for get desc html string and download image by parse doc, return html
-func (s *SiteService) parseDescHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) string {
-	var html string
+// splitDescHTMLParse for split description html and parse by order, return desc info list
+func (s *SiteService) splitDescHTMLParse(html string, pageURL string) []string {
+	var descInfo []string
 
-	for _, selector := range selectors {
-		selection := iterativeHTML(doc.Selection, selector)  // get first
-		if !checkSelectionLegal(selection, "html", selector, "parseDescHTML") {
+	htmlList := strings.Split(html, "\n")
+	for _, h := range htmlList {
+		h = strings.TrimSpace(h)  // remove space from head and tail
+		if len(h) <= 0 {
 			continue
 		}
 
-		html, _ = selection.Html()
-		if len(html) > 0 {
-			html = s.ReplaceImagePaths(html, pageURL)
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(h))
+		if err != nil {
+			log.WithFields(log.Fields{
+				"html":	h,
+			}).Debug("can not parse string to html by splitDescParseHTML")
 
+			continue
+		}
+
+		if len(doc.Text()) > 0 {  // get text description
+			descInfo = append(descInfo, strings.TrimSpace(doc.Text()))
+		}
+
+		images := s.replaceImagePaths(h, pageURL)  // get image description
+		if len(images) <= 0 {
+			continue
+		}
+
+		for _, image := range images {
+			descInfo = append(descInfo, image)
+		}
+	}
+
+	return descInfo
+}
+
+// parseDescHTML for get desc html string and download image by parse doc, return desc info list
+func (s *SiteService) parseDescHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) []string {
+	for _, selector := range selectors {
+		labelList := strings.Split(selector, cm.ListSeparate)
+		selection := iterativeHTML(doc.Selection, labelList[0])  // get first
+		if !checkSelectionLegal(selection, "html", selector, "parsePriceHTML") {
+			continue
+		}
+
+		var dataInfos []string
+		selection.Each(func(i int, selection1 *goquery.Selection) {
+			selc := selection1
+			if len(labelList) > 1 && len(labelList[1]) > 0 {
+				selc = iterativeHTML(selection1, labelList[1]) // get first
+				if !checkSelectionLegal(selc, "html", selector, "parsePriceHTML") {
+					return
+				}
+			}
+
+			html, _ := selc.Html()
+			if len(html) > 0 {
+				descs := s.splitDescHTMLParse(html, pageURL)
+				for i := 0; i < len(descs); i++ {
+					dataInfos = append(dataInfos, descs[i])
+				}
+			}
+		})
+
+		if len(dataInfos) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"htmlLabel":	selector,
-			}).Debug("parseDescHTML success")
+				"selector":	selector,
+			}).Debug("ParsePriceHTML success")
 
-			return html
+			return dataInfos
 		}
 	}
 
 	// debug
-	if len(html) <= 0 {
-		//  debug
-		log.WithFields(log.Fields{
-			"htmlLabel":	selectors,
-		}).Debug("can not get desc by parseDescHTML")
-	}
+	log.WithFields(log.Fields{
+		"selectors":	selectors,
+	}).Debug("can not get desc by parseDescHTML")
 
-	return html
+	return []string{}
 }
 
-// parseSetHTML for get set meal html string and download image by parse doc, return html
-func (s *SiteService) parseSetHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) [][]string {
-	var dataList [][]string
-	urlMD5 := ut.GetMD5(pageURL)
-
+// parseDescJSON for get string and download image by parse doc, return desc info list
+func (s *SiteService) parseDescJSON(body []byte, pageURL string, selectors []string) []string {
 	for _, selector := range selectors {
-		selection := iterativeHTML(doc.Selection, selector)  // get first
-		if !checkSelectionLegal(selection, "html", selector, "parseSetHTML") {
+		labelList := strings.Split(selector, cm.ListSeparate)
+		labels := strings.Split(labelList[0], cm.LabelSeparate)
+		jIter := jsoniter.Get(body, labels[0])
+		jIter = iterativeJSON(jIter, labels[1: ])
+		if !checkSelectionLegal(jIter, "json", selector, "parseDescJSON") {
 			continue
 		}
 
+		var descHTMLs []string  // if contains multi price
+		if len(labelList) > 1 && len(labelList[1]) > 0 {  // if contains ";", means labelList[1] indicates that the previous layer is list
+			iterNum := jIter.Size()
+			for i := 0; i < iterNum; i++ {
+				iter := iterativeJSON(jIter.Get(i), strings.Split(labelList[1], cm.LabelSeparate))
+				if !checkSelectionLegal(iter, "json", selector, "parseDescJSON") {
+					continue
+				}
+
+				descHTMLs = append(descHTMLs, iter.ToString())
+			}
+		} else {
+			descHTMLs = append(descHTMLs, jIter.ToString())
+		}
+
+		var dataInfos []string  // final price
+		for i := 0; i < len(descHTMLs); i++ {
+			descs := s.splitDescHTMLParse(descHTMLs[i], pageURL)
+			for j := 0; j < len(descs); j++ {
+				dataInfos = append(dataInfos, descs[j])
+			}
+		}
+
+		if len(dataInfos) > 0 {
+			//  debug
+			log.WithFields(log.Fields{
+				"selector":	selector,
+			}).Debug("parseDescJSON success")
+
+			return dataInfos
+		}
+	}
+
+	//  debug
+	log.WithFields(log.Fields{
+		"selectors":	selectors,
+	}).Debug("can not get desc by parseDescJSON")
+
+	return []string{}
+}
+
+// parseGoodHTML for get goods html string and download image by parse doc, return goods info list
+func (s *SiteService) parseGoodHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) [][]string {
+	urlMD5 := ut.GetMD5(pageURL)
+	for _, selector := range selectors {
+		labelList := strings.Split(selector, cm.ListSeparate)
+		selection := iterativeHTML(doc.Selection, labelList[0])  // get first
+		if !checkSelectionLegal(selection, "html", selector, "parseGoodHTML") {
+			continue
+		}
+
+		var dataInfos [][]string
 		// get list
-		selection.Each(func(i int, selc *goquery.Selection) {
-			var data []string
+		selection.Each(func(i int, selection1 *goquery.Selection) {
+			selc := selection1
+			if len(labelList) > 1 && len(labelList[1]) > 0 {
+				selc = iterativeHTML(selection1, labelList[1]) // get first
+				if !checkSelectionLegal(selc, "html", selector, "parseGoodHTML") {
+					return
+				}
+			}
+
 			html, _ := selc.Html()
 			if len(html) <= 0 {
-				log.Debug("this selection of html is empty by parseSetHTML")
+				log.Debug("this selection of html is empty by parseGoodHTML")
 
 				return
 			}
 
-			html = s.ReplaceImagePaths(html, pageURL)
-			data = append(data, urlMD5)
-			data = append(data, html)
-			dataList = append(dataList, data)
+			text := selc.Text()
+			images := s.replaceImagePaths(html, pageURL)  // get image description
+			if len(images) <= 0 {  // there is no images
+				var data []string
+				data = append(data, urlMD5)
+				data = append(data, text)
+				data = append(data, "")
+				dataInfos = append(dataInfos, data)
+			}
+			for _, image := range images {
+				var data []string
+				data = append(data, urlMD5)
+				data = append(data, text)
+				data = append(data, image)
+				dataInfos = append(dataInfos, data)
+			}
 		})
 
-		if len(dataList) > 0 {
+		if len(dataInfos) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"htmlLabel":	selector,
-			}).Debug("parseSetHTML success")
+				"selector":	selector,
+			}).Debug("parseGoodHTML success")
 
-			break
+			return dataInfos
 		}
 	}
 
-	// debug
-	if len(dataList) <= 0 {
-		//  debug
-		log.WithFields(log.Fields{
-			"htmlLabel":	selectors,
-		}).Debug("can not get set by parseSetHTML")
-	}
+	//  debug
+	log.WithFields(log.Fields{
+		"selectors":	selectors,
+	}).Debug("can not get goods by parseGoodHTML")
 
-	return dataList
+	return [][]string{}
 }
 
-// TODO: can not get mapping to set meal
+
+
+// parseGoodJSON for get string and download image by parse doc, return goods info list
+func (s *SiteService) parseGoodJSON(body []byte, pageURL string, selectors []string) [][]string {
+	urlMD5 := ut.GetMD5(pageURL)
+	for _, selector := range selectors {
+		labelList := strings.Split(selector, cm.ListSeparate)
+		labels := strings.Split(labelList[0], cm.LabelSeparate)
+		jIter := jsoniter.Get(body, labels[0])
+		jIter = iterativeJSON(jIter, labels[1: ])
+		if !checkSelectionLegal(jIter, "json", selector, "parseGoodJSON") {
+			continue
+		}
+
+		var dataInfos [][]string
+		if len(labelList) > 1 && len(labelList[1]) > 0 {  // if contains ";", means labelList[1] indicates that the previous layer is list
+			iterNum := jIter.Size()
+			for i := 0; i < iterNum; i++ {
+				iter := iterativeJSON(jIter.Get(i), strings.Split(labelList[1], cm.LabelSeparate))
+				if !checkSelectionLegal(iter, "json", selector, "parseGoodJSON") {
+					continue
+				}
+
+				text := iter.ToString()
+				if len(text) > 0 {
+					var data []string
+					data = append(data, urlMD5)
+					data = append(data, text)  // add good text
+					data = append(data, "")  // add good image
+					dataInfos = append(dataInfos, data)
+				}
+			}
+		} else {
+			text := jIter.ToString()
+			if len(text) > 0 {
+				var data []string
+				data = append(data, urlMD5)
+				data = append(data, text)  // add good data
+				data = append(data, "")  // add good image
+				dataInfos = append(dataInfos, data)
+			}
+		}
+
+		if len(dataInfos) > 0 {
+			//  debug
+			log.WithFields(log.Fields{
+				"selector":	selector,
+			}).Debug("parseGoodJSON success")
+
+			return dataInfos
+		}
+	}
+
+	//  debug
+	log.WithFields(log.Fields{
+		"selectors":	selectors,
+	}).Debug("can not get goods by parseGoodJSON")
+
+	return [][]string{}
+}
+
+// TODO: can not get mapping to goods
 // iterativeLoopHTML return pointer list of spec data
-// levels for match spec data and set data, first set data match level1 spec data
+// levels for match spec data and goods data, first goods data match level1 spec data
 func iterativeLoopHTML(selection *goquery.Selection, selector string, urlMD5 string, style string, levels []string, level int, dataList *[][]string) *[][]string {
 	index := strings.Index(selector, cm.ListSeparate)
 	if index == -1 {
@@ -913,19 +1180,15 @@ func iterativeLoopHTML(selection *goquery.Selection, selector string, urlMD5 str
 	// get style and its labels
 	var styleTitles []string
 	iterSelector := selector[: index]
-	sub := setKVMatch.FindStringSubmatch(iterSelector)  // match style labels
-	if len(sub) > 1 {
-		values := strings.Split(sub[1], ":")
+	// match style and its value's labels
+	subG := goodKVMatch.FindStringSubmatch(iterSelector)
+	if len(subG) > 1 {  // sub[0] is the origin str, ignore it, only use sub[1]
+		values := strings.Split(subG[1], ":")
 		styleSection := selection  // separate from get style value and style title
 		styleSection.Find(values[0]).Each(func(i int, selc *goquery.Selection) { // get style title
 			styleTitles = append(styleTitles, strings.TrimSpace(selc.Text()))
 		})
 		iterSelector = values[1]  // get style value's labels
-	}
-
-	selection = iterativeHTML(selection, iterSelector)
-	if !checkSelectionLegal(selection, "html", selector[: index], "iterativeLoopHTML") {
-		return dataList
 	}
 
 	// travers all the list label marked by ";"
@@ -944,136 +1207,165 @@ func iterativeLoopHTML(selection *goquery.Selection, selector string, urlMD5 str
 	return dataList
 }
 
-// parseSpecHTML for get spec html string and download image by parse doc, return html
+// parseSpecHTML for get spec html string and download image by parse doc, return spec info list
 func (s *SiteService) parseSpecHTML(doc *goquery.Document, pageURL string, imageDir string, selectors []string) [][]string {
-	var dataList [][]string
 	urlMD5 := ut.GetMD5(pageURL)
-
 	for _, selector := range selectors {
-		var levels []string
-		dataList = *iterativeLoopHTML(doc.Selection, selector, urlMD5, "", levels, 1, &dataList)  // iterative till first list
+		//var levels []string
+		//dataList = *iterativeLoopHTML(doc.Selection, selector, urlMD5, "", levels, 1, &dataList)  // iterative till first list
+		labelList := strings.Split(selector, cm.ListSeparate)
+		selection := iterativeHTML(doc.Selection, labelList[0])  // get first
+		if !checkSelectionLegal(selection, "html", selector, "parseSpecHTML") {
+			continue
+		}
 
-		if len(dataList) > 0 {
+		// get style and its labels
+		var dataInfos [][]string
+		var styleTitles []string
+		var valueSelector string
+		if len(labelList) > 1 && len(labelList[1]) > 0 {
+			sub := goodKVMatch.FindStringSubmatch(labelList[1]) // match style labels
+			if len(sub) > 1 {
+				values := strings.Split(sub[1], ":")
+				styleSection := selection // separate from get style value and style title
+				styleMap := make(map[string]int)
+				styleSection.Find(values[0]).Each(func(i int, selc *goquery.Selection) { // get style title
+					sText := strings.TrimSpace(selc.Text())
+					_, ok := styleMap[sText]  // avoid duplicate style
+					if !ok {
+						styleMap[sText] = 1
+						styleTitles = append(styleTitles, sText)
+					}
+				})
+				valueSelector = values[1] // get style value's labels
+			}
+		}
+
+		bigNum := len(styleTitles)
+		bigNumFloat := float64(bigNum)
+		selection.Each(func(i int, selection1 *goquery.Selection) {
+			selection1.Find(valueSelector).Each(func(j int, selection2 *goquery.Selection) {
+				selection2.Children().Each(func(k int, selection3 *goquery.Selection) {
+					html, err := selection3.Html()
+					if err != nil {
+						return
+					}
+
+					style := styleTitles[j % bigNum]  // use Module bigNum division to get corresponding style
+					bigID := strconv.Itoa(int(math.Floor(float64(j) / bigNumFloat)))  // use floor to get big id
+					text := selection3.Text()
+					images := s.replaceImagePaths(html, pageURL)  // get image description
+					if len(images) <= 0 {  // there is no images
+						var data []string
+						data = append(data, urlMD5)
+						data = append(data, style)
+						data = append(data, "good_" + strconv.Itoa(i) + "-num_" + bigID)
+						data = append(data, strings.TrimSpace(text))
+						data = append(data, "")
+						dataInfos = append(dataInfos, data)
+					}
+					for _, image := range images {
+						var data []string
+						data = append(data, urlMD5)
+						data = append(data, style)
+						data = append(data, "good_" + strconv.Itoa(i) + "-num_" + bigID)
+						data = append(data, strings.TrimSpace(text))
+						data = append(data, image)
+						dataInfos = append(dataInfos, data)
+					}
+				})
+			})
+		})
+
+		if len(dataInfos) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"htmlLabel":	selector,
+				"selector":	selector,
 			}).Debug("parseSpecHTML success")
 
-			break
+			return dataInfos
 		}
 	}
 
-	// debug
-	if len(dataList) <= 0 {
-		//  debug
-		log.WithFields(log.Fields{
-			"htmlLabel":	selectors,
-		}).Debug("can not get spec by parseSpecHTML")
-	}
+	//  debug
+	log.WithFields(log.Fields{
+		"selectors":	selectors,
+	}).Debug("can not get spec by parseSpecHTML")
 
-	return dataList
+	return [][]string{}
 }
 
-// iterativeJSON for iterative locate selection return located pointer of jsoniter.Any
-func iterativeJSON(jIter jsoniter.Any, labels []string) jsoniter.Any {
-	for i := 0; i < len(labels); i++ {  // cascade find label
-		jIter = jIter.Get(labels[i])
-		if !checkSelectionLegal(jIter, "json", strings.Join(labels, "|"), "iterativeJSON") {
-			break
+// TODO: can not get mapping to goods
+// iterativeLoopJSON return pointer list of spec data
+// levels for match spec data and goods data, first goods data match level1 spec data
+func iterativeLoopJSON(jIter jsoniter.Any, selector string, urlMD5 string, styleKey string,
+	goodID int, numID int, dataList *[][]string) *[][]string {
+	index := strings.Index(selector, cm.ListSeparate)
+	if index == -1 {
+		// match style value's labels
+		var styleValues []string
+		subGV := goodValueMatch.FindStringSubmatch(selector)
+		if len(subGV) > 1 {
+			styleValues = strings.Split(subGV[1], ",")
 		}
-	}
 
-	return jIter
-}
-
-// parseDescJSON for get string and download image by parse doc, return html
-func (s *SiteService) parseDescJSON(body []byte, selectors []string) string {
-	var data string
-	for _, selector := range selectors {
-		labels := strings.Split(selector, cm.LabelSeparate)
-		jIter := jsoniter.Get(body, labels[0])
-		jIter = iterativeJSON(jIter, labels[1: ])
-
-		data = jIter.ToString()
-		if len(data) > 0 {
-			//  debug
-			log.WithFields(log.Fields{
-				"jsonLabel":	selector,
-			}).Debug("parseDescJSON success")
-
-			break
+		var data []string
+		data = append(data, urlMD5)
+		data = append(data, styleKey)
+		data = append(data, "good_" + strconv.Itoa(goodID) + "-num_" + strconv.Itoa(numID))
+		jIterBak := jIter
+		for i := 0; i < len(styleValues); i++ {  // add style values
+			jIter = jIterBak
+			jIter = iterativeJSON(jIter, strings.Split(styleValues[i], cm.LabelSeparate))
+			data = append(data, jIter.ToString())
 		}
+		*dataList = append(*dataList, data)
+
+		return dataList
 	}
 
-	// debug
-	if len(data) <= 0 {
-		//  debug
-		log.WithFields(log.Fields{
-			"jsonLabel":	selectors,
-		}).Debug("can not get desc by parseDescJSON")
+	// get mapping identification
+	mappingFlag := false
+	iterSelector := selector[: index]
+	if strings.HasSuffix(iterSelector, "^") {
+		iterSelector = strings.ReplaceAll(iterSelector, "^", "")  // remove mapping identification
+		mappingFlag = true
 	}
 
-	return data
-}
-
-// parseSetJSON for get string and download image by parse doc, return html
-func (s *SiteService) parseSetJSON(body []byte, pageURL string, selectors []string) [][]string {
-	var dataList [][]string
-	urlMD5 := ut.GetMD5(pageURL)
-
-	for _, selector := range selectors {
-		labelList := strings.Split(selector, cm.ListSeparate)
-		labels := strings.Split(labelList[0], cm.LabelSeparate)
-		jIter := jsoniter.Get(body, labels[0])
-		jIter = iterativeJSON(jIter, labels[1: ])
-
-		if len(labelList) > 1 {  // means labels has list
-			for i := 0; i < jIter.Size(); i++{
-				iter := jIter.Get(i)
-				if len(labelList[1]) > 0 {
-					iter = iterativeJSON(iter, strings.Split(labelList[1], cm.LabelSeparate))
-				}
-
-				str := iter.ToString()
-				if len(str) <= 0 {
-					log.Debug("this jsonIter is empty by parseSetJSON")
-
-					continue
-				}
-
-				var data []string
-				data = append(data, urlMD5)
-				str = s.ReplaceImagePaths(str, pageURL)
-				data = append(data, str)  // add set meal data
-				dataList = append(dataList, data)
+	// get style and its labels
+	// match style and its value's labels
+	subG := goodKVMatch.FindStringSubmatch(iterSelector)
+	if len(subG) > 1 {  // subG[0] is the origin str, ignore it, only use subG[1]
+		values := strings.Split(subG[1], ":")
+		if len(values) > 1 {
+			styleJIter := jIter  // separate from get style value and style title
+			iter := iterativeJSON(styleJIter, strings.Split(values[0], cm.LabelSeparate))
+			if checkSelectionLegal(iter, "json", values[0], "iterativeLoopJSON") {
+				styleKey = iter.ToString()
 			}
-		} else {
-			str := jIter.ToString()
-			if len(str) > 0 {
-				var data []string
-				data = append(data, urlMD5)
-				str = s.ReplaceImagePaths(str, pageURL)
-				data = append(data, str)  // add set meal data
-				dataList = append(dataList, data)
-			}
-		}
-
-		if len(dataList) > 0 {
-			//  debug
-			log.WithFields(log.Fields{
-				"jsonLabel":	selector,
-			}).Debug("parseSetJSON success")
-
-			break
+			iterSelector = values[1]  // get style value's labels
 		}
 	}
 
-	// debug
-	if len(dataList) <= 0 {
-		//  debug
-		log.WithFields(log.Fields{
-			"jsonLabel":	selectors,
-		}).Debug("can not get set by parseSetJSON")
+	iter := iterativeJSON(jIter, strings.Split(iterSelector, cm.LabelSeparate))
+	if !checkSelectionLegal(iter, "json", iterSelector, "iterativeLoopJSON") {
+		return dataList
+	}
+
+	// do ergodic
+	size := iter.Size()
+	if size > 0 {
+		numIDBak := numID
+		for i := 0; i < size; i++ {
+			// recursive call
+			if mappingFlag {
+				goodID = i
+			}
+			if !mappingFlag && goodID >= 0 && numIDBak == -1 {  // goodID and numID are not located at same level
+				numID = i
+			}
+			dataList = iterativeLoopJSON(iter.Get(i), selector[index + 1 :], urlMD5, styleKey, goodID, numID, dataList)
+		}
 	}
 
 	return dataList
@@ -1082,69 +1374,33 @@ func (s *SiteService) parseSetJSON(body []byte, pageURL string, selectors []stri
 // TODO: can not get spec title
 // parseSpecJSON for get string and download image by parse doc, return html
 func (s *SiteService) parseSpecJSON(body []byte, pageURL string, selectors []string) [][]string {
-	var dataList [][]string
 	urlMD5 := ut.GetMD5(pageURL)
-
 	for _, selector := range selectors {
-		labelList := strings.Split(selector, cm.ListSeparate)
-		labels := strings.Split(labelList[0], cm.LabelSeparate)
-		jIter := jsoniter.Get(body, labels[0])
-		jIter = iterativeJSON(jIter, labels[1: ])
-
-		if len(labelList) > 1 {  // means labels has list
-			for i := 0; i < jIter.Size(); i++{
-				iter := jIter.Get(i)
-				if len(labelList[1]) > 0 {
-					iter = iterativeJSON(iter, strings.Split(labelList[1], cm.LabelSeparate))
-				}
-
-				str := iter.ToString()
-				if len(str) <= 0 {
-					log.Debug("this jsonIter is empty by parseSpecJSON")
-
-					continue
-				}
-
-				var data []string
-				data = append(data, urlMD5)
-				data = append(data, "")  // add spec title
-				data = append(data, iter.Keys()[i])  // add spec mapping
-				str = s.ReplaceImagePaths(str, pageURL)
-				data = append(data, str)
-				dataList = append(dataList, data)
-			}
-		} else {
-			str := jIter.ToString()
-			if len(str) > 0 {
-				var data []string
-				data = append(data, urlMD5)
-				data = append(data, "")  // add spec title
-				data = append(data, jIter.Keys()[0])  // add spec mapping
-				str = s.ReplaceImagePaths(str, pageURL)
-				data = append(data, str)
-				dataList = append(dataList, data)
-			}
+		index := strings.Index(selector, cm.ListSeparate)
+		if index == -1 {
+			continue
 		}
 
-		if len(dataList) > 0 {
+		var dataInfos [][]string
+		jIter := jsoniter.Get(body)
+		iterativeLoopJSON(jIter, selector, urlMD5, "", -1, -1, &dataInfos)
+
+		if len(dataInfos) > 0 {
 			//  debug
 			log.WithFields(log.Fields{
-				"jsonLabel":	selector,
+				"selector":	selector,
 			}).Debug("parseSpecJSON success")
 
-			break
+			return dataInfos
 		}
 	}
 
-	// debug
-	if len(dataList) <= 0 {
-		//  debug
-		log.WithFields(log.Fields{
-			"jsonLabel":	selectors,
-		}).Debug("can not get spec by parseSpecJSON")
-	}
+	//  debug
+	log.WithFields(log.Fields{
+		"selectors":	selectors,
+	}).Debug("can not get spec by parseSpecJSON")
 
-	return dataList
+	return [][]string{}
 }
 
 // TaskDownload for download image task

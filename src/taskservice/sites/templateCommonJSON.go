@@ -5,6 +5,7 @@
 package sites
 
 import (
+	ut "siteResService/src/util"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -32,7 +33,7 @@ func (s *SiteService) ParseInfoCommonJSON(pageURL string, body []byte, labels *c
 
 	// head image
 	imageDir := cm.ImageDir + time.Now().Format("2006/01/02")
-	pi.Cover = s.ParseCoverImagesJSON(body, pageURL, imageDir, labels.Cover)
+	pi.Cover = s.parseCoverImagesJSON(body, pageURL, imageDir, labels.Cover)
 
 	//logs.Info(covers)
 	//pi.Cover = images
@@ -41,16 +42,16 @@ func (s *SiteService) ParseInfoCommonJSON(pageURL string, body []byte, labels *c
 	//}
 
 	// title
-	pi.Title = s.ParseTitleJSON(body, labels.Title)
+	pi.Title = s.parseTitleJSON(body, labels.Title)
 
 	// price
-	pi.Price = s.ParsePriceJSON(body, labels.Price)
+	pi.Price = s.parsePriceJSON(body, labels.Price)
 
 	// description
-	pi.Desc = s.parseDescJSON(body, labels.Desc)
+	pi.Desc = ut.ToJson(s.parseDescJSON(body, pageURL, labels.Desc))
 
 	// set meal
-	pi.Set = s.parseSetJSON(body, pageURL, labels.Set)
+	pi.Set = s.parseGoodJSON(body, pageURL, labels.Good)
 
 	// specifications
 	pi.Spec = s.parseSpecJSON(body, pageURL, labels.Spec)

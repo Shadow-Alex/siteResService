@@ -2,7 +2,7 @@
   Package task for seek suggestion with specified page id using http service
 */
 
-package task
+package taskservice
 
 import (
 	"net/url"
@@ -17,7 +17,7 @@ import (
 	"github.com/tebeka/selenium"
 
 	cm "siteResService/src/common"
-	md "siteResService/src/mysqlClient/models"
+	md "siteResService/src/mysqlclient/models"
 	ut "siteResService/src/util"
 )
 
@@ -90,7 +90,7 @@ func getDocWebDriver(wd *selenium.WebDriver, pageURL string) *goquery.Document {
 }
 
 // requestDocWebDriver returns currentURL and pointer of main page and order page body goquery.Document by web driver
-func (t *ServiceTask) requestDocWebDriver(pageURL string) (string, *goquery.Document, *goquery.Document) {
+func (t *TaskService) requestDocWebDriver(pageURL string) (string, *goquery.Document, *goquery.Document) {
 	wd := t.httpService.GetURLWebDriver(pageURL)
 	if wd == nil {
 		log.WithFields(log.Fields{
@@ -194,7 +194,7 @@ func getOrderHref(doc *goquery.Document, pageURL string, orderLabel string) stri
 }
 
 // requestDocHTTP returns main doc and order doc pointer of goquery.Document instance by http request get
-func (t *ServiceTask) requestDocHTTP(pageURL string, orderLabels []string) (*goquery.Document, *goquery.Document) {
+func (t *TaskService) requestDocHTTP(pageURL string, orderLabels []string) (*goquery.Document, *goquery.Document) {
 	doc := t.httpService.GetDocRequestGet(pageURL)
 	if doc == nil {
 		return nil, nil
@@ -220,7 +220,7 @@ func (t *ServiceTask) requestDocHTTP(pageURL string, orderLabels []string) (*goq
 
 			return nil, nil
 		} else {
-			if strings.Contains(orderURL, "/") {  // href not a path, not legal
+			if !strings.Contains(orderURL, "/") {  // href not a path, not legal
 				log.Info("can not find order href, use web driver to get page again")
 
 				return nil, nil
@@ -245,8 +245,18 @@ func (t *ServiceTask) requestDocHTTP(pageURL string, orderLabels []string) (*goq
 	return doc, orderDoc
 }
 
+
+// checkResLegal returns true if the resource is legal
+func checkResLegal(pi *cm.ProInfo) bool {
+	if pi != nil && len(pi.Cover) > 0 && len(pi.Desc) > 0 {
+		return true
+	} else {
+		return false
+	}
+}
+
 // parseWebPage for parse web page of this pageURL to get site resource
-func (t *ServiceTask) parseWebPage(pageURL string) *cm.ProInfo {
+func (t *TaskService) parseWebPage(pageURL string) *cm.ProInfo {
 	u, _ := url.Parse(pageURL)
 	domainMD5 := ut.GetMD5(u.Host)
 
@@ -380,7 +390,7 @@ func chDirMod(dir string) {
 
 
 // saveProInfo for save site resource info
-func (t *ServiceTask) saveProInfo(ce *cm.CargoExtInfo, pi *cm.ProInfo) {
+func (t *TaskService) saveProInfo(ce *cm.CargoExtInfo, pi *cm.ProInfo) {
 	// 先删除后插入
 	itemMaterials := new(md.WcCargoMaterials)
 	itemMaterials.CargoId = ce.CargoID
@@ -498,7 +508,7 @@ func getSpecifiedRes(pi *cm.ProInfo, resTitle string) interface{} {
 }
 
 // queryResource for query specified site resource by url md5, return true if query success
-func (t *ServiceTask) queryResource(pageURL string, resTitle string) interface{} {
+func (t *TaskService) QueryResource(pageURL string, resTitle string) interface{} {
 	if len(pageURL) <= 0 {
 		log.Error("do not get page url by queryResource")
 

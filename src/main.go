@@ -16,24 +16,28 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	cm "siteResService/src/common"
-	ds "siteResService/src/deliveryService"
-	hs "siteResService/src/httpService"
-	mc "siteResService/src/mysqlClient"
+	hs "siteResService/src/httpservice"
+	rt "siteResService/src/httpservice/routers"
+	ms "siteResService/src/microservice"
+	mc "siteResService/src/mysqlclient"
 	sc "siteResService/src/scheduler"
 	sa "siteResService/src/standalone"
-	tk "siteResService/src/task"
+	tk "siteResService/src/taskservice"
 	ut "siteResService/src/util"
 )
 
 
 // Server represents main server
 type Server struct {
+	micro			*ms.MicroService
 	standalone  	*sa.StandAlone
-	task      		*tk.ServiceTask
+	task      		*tk.TaskService
 	scheduler 		*sc.Scheduler
 	http      		*hs.ServiceHTTP
-	delivery  		*ds.ServiceDelivery
+	delivery  		*ms.ServiceDelivery
 	db   			*mc.MySQLClient
+	subChan			chan string
+	subCounter		uint64  // calculation receive num of subscriber, must use by atomic !!!
 }
 
 var initOnce sync.Once
@@ -67,15 +71,15 @@ func initCommonRes() {
 func supervise() {
 	tdur := beego.AppConfig.DefaultInt("supervise.gap", cm.SuperviseGap)
 	for {
-		subNum := atomic.LoadUint64(&server.task.SubCounter)
-		pubNum := atomic.LoadUint64(&server.delivery.DeliverCounter)
+		subNum := atomic.LoadUint64(&server.subCounter)
+		pubNum := atomic.LoadUint64(&server.micro.DeliverCounter)
 		requestNum := atomic.LoadUint64(&server.http.RequestCounter)
 		//insertDBNum := atomic.LoadUint64(&server.db.InsertCounter)
 		//updateDBNum := atomic.LoadUint64(&server.db.UpdateCounter)
 
 		// reset counter to 0
-		atomic.StoreUint64(&server.task.SubCounter, 0)
-		atomic.StoreUint64(&server.delivery.DeliverCounter, 0)
+		atomic.StoreUint64(&server.subCounter, 0)
+		atomic.StoreUint64(&server.micro.DeliverCounter, 0)
 		atomic.StoreUint64(&server.http.RequestCounter, 0)
 		//atomic.StoreUint64(&server.db.InsertCounter, 0)
 		//atomic.StoreUint64(&server.db.UpdateCounter, 0)
@@ -97,6 +101,10 @@ func supervise() {
 func startMicroServer() {
 	initOnce.Do(func() {
 		server = new(Server)
+
+		atomic.StoreUint64(&server.subCounter, 0) // init counter to 0
+		size := beego.AppConfig.DefaultInt("channelSize", cm.MaxChannelSize)
+		server.subChan = make(chan string, size)
 		server.scheduler = sc.GetScheduler()
 		server.http = hs.GetHTTPInstance()
 		//conn := cm.GetDBConns("KR")  // get db connection
@@ -106,20 +114,23 @@ func startMicroServer() {
 		//	return
 		//}
 		//server.db = mc.GetMySQLClientInstance(conn)
-		// GetTaskServiceInstance will create micro service instance, should before GetDeliveryServiceInstance
-		server.task = tk.GetTaskInstance(true, server.db)
-		server.delivery = ds.GetDeliveryInstance()
+		//GetTaskServiceInstance will create micro service instance, should before GetDeliveryServiceInstance
+		server.task = tk.GetTaskInstance(server.db)
+
+		// init micro service
+		server.micro = ms.GetMicroService(rt.GetRouters(server.task, &server.subCounter),
+			server.http, &server.subChan, &server.subCounter)
 
 		// debug, for temporary
-		server.standalone = sa.GetStandAloneInstance(server.db, server.task)
+		server.standalone = sa.GetStandAloneInstance(server.db, &server.subChan, &server.subCounter)
 
 		go supervise()  // supervise speed
 
 		go dispatch(server)  // dispatch msg
 
-		go server.task.RunMicroWebService()  // go routine run micro web service
+		go server.micro.RunMicroService()  // go routine run micro service as main process
 
-		server.task.RunMicroService()  // run micro service as main process
+		server.micro.RunMicroWebService()  // run micro web service
 	})
 }
 
@@ -128,7 +139,7 @@ func dispatch(server *Server) {
 	for {
 		select {
 		// do task of parse url
-		case msg := <-server.task.SubChan:
+		case msg := <-server.subChan:
 			ctrl := &sc.ControlInfo{
 				Name:    "http",  // must has value
 				CtrlNum: 30,  // the size of concurrent routine pool
@@ -161,6 +172,10 @@ func dispatch(server *Server) {
 func startStandAloneServer(destSCR string) {
 	initOnce.Do(func() {
 		server = new(Server)
+
+		atomic.StoreUint64(&server.subCounter, 0) // init counter to 0
+		size := beego.AppConfig.DefaultInt("channelSize", cm.MaxChannelSize)
+		server.subChan = make(chan string, size)
 		server.scheduler = sc.GetScheduler()
 		server.http = hs.GetHTTPInstance()
 		//conn := cm.GetDBConns("dbWC")  // get db connection
@@ -173,8 +188,13 @@ func startStandAloneServer(destSCR string) {
 		//server.db = mc.GetMySQLClientInstance(conn)
 
 		// GetStandAloneInstance will use task, GetTaskInstance should before GetStandAloneInstance
-		server.task = tk.GetTaskInstance(false, server.db)
-		server.standalone = sa.GetStandAloneInstance(server.db, server.task)
+		server.task = tk.GetTaskInstance(server.db)
+
+		// init micro service
+		server.micro = ms.GetMicroService(rt.GetRouters(server.task, &server.subCounter),
+			server.http, &server.subChan, &server.subCounter)
+
+		server.standalone = sa.GetStandAloneInstance(server.db, &server.subChan, &server.subCounter)
 
 		//go supervise() // supervise status
 
@@ -187,7 +207,9 @@ func startStandAloneServer(destSCR string) {
 		}
 
 		// not use go routine for block main process
-		dispatchStandAlone(server)
+		go dispatchStandAlone(server)
+
+		server.micro.RunMicroWebService()
 
 		server.standalone.CloseFileTGT()
 	})
@@ -198,7 +220,7 @@ func dispatchStandAlone(server *Server) {
 	for {
 		select {
 		// do task of parse url
-		case msg := <-server.task.SubChan:
+		case msg := <-server.subChan:
 			ctrl := &sc.ControlInfo{
 				Name:    "http",  // must has value
 				CtrlNum: 30,  // the size of concurrent routine pool
@@ -231,35 +253,36 @@ func dispatchStandAlone(server *Server) {
 func main() {
 	initCommonRes()
 
-	runType := cm.RunTypeStandAlone
-	if len(os.Args) < 3 {
-		log.Error("do not get args for source file, exit")
+	//runType := cm.RunTypeStandAlone
+	//if len(os.Args) > 3 {
+	//	log.Error("do not get args for source file, exit")
 
-		return
-	}
-	destSCR := os.Args[2]
-
-	switch runType {
-	case cm.RunTypeStandAlone:
-		startStandAloneServer(destSCR)
-	case cm.RunTypeMicro:
-		startMicroServer()
-	}
-
-	//runType := cm.RunTypeMicro
-	//destSCR := cm.DestStandAloneDB
-	//if len(os.Args) > 1 {
-	//	runType = os.Args[1]
+	//
+	//	return
 	//}
-	//if len(os.Args) > 2 {
-	//	destSCR = os.Args[2]
-	//}
+	//destSCR := os.Args[2]
 	//
 	//switch runType {
 	//case cm.RunTypeStandAlone:
 	//	startStandAloneServer(destSCR)
-	//
 	//case cm.RunTypeMicro:
 	//	startMicroServer()
 	//}
+
+	runType := cm.RunTypeMicro
+	destSCR := cm.DestStandAloneDB
+	if len(os.Args) > 1 {
+		runType = os.Args[1]
+	}
+	if len(os.Args) > 2 {
+		destSCR = os.Args[2]
+	}
+
+	switch runType {
+	case cm.RunTypeStandAlone:
+		startStandAloneServer(destSCR)
+
+	case cm.RunTypeMicro:
+		startMicroServer()
+	}
 }

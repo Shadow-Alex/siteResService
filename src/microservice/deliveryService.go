@@ -1,16 +1,15 @@
 /*
-  Package delivery using micro broker's publisher and subscriber to send and receive event.
+  Package microservice using micro broker's publisher and subscriber to send and receive event.
 */
 
-package delivery
+package microservice
 
 import (
-	"context"
-	"runtime/debug"
-	"strconv"
-	"sync"
-	"sync/atomic"
 	"time"
+	"context"
+	"strconv"
+	"sync/atomic"
+	"runtime/debug"
 
 	"github.com/micro/go-micro"
 	"github.com/micro/go-micro/server"
@@ -24,50 +23,21 @@ import (
 
 // ServiceDelivery represents delivery service to send and receive event.
 type ServiceDelivery struct {
-	microService   *micro.Service // micro service
-	pubSMap        sync.Map       // store publisher map, publisher associated with topic
-	DeliverCounter uint64         // calculation num of delivery by publisher, must use by atomic !!!
-}
 
-var instance *ServiceDelivery
-var initDeliveryOnce sync.Once
-
-// GetDeliveryInstance return ServiceDelivery pointer instance with init once.
-// use ...*micro.Service for only get instance without pass parameter after init
-func GetDeliveryInstance(microService ...*micro.Service) *ServiceDelivery {
-	initDeliveryOnce.Do(func() {
-		if len(microService) > 0 {
-			instance = new(ServiceDelivery)
-			instance.init(microService[0])
-
-			log.Info("init delivery service instance success...")
-		} else {
-			log.Fatal("first init delivery service do not get micro.Service instance !!!")
-		}
-	})
-
-	return instance
-}
-
-// init delivery service instance.
-func (delivery *ServiceDelivery) init(microService *micro.Service) {
-	delivery.microService = microService
-
-	atomic.StoreUint64(&delivery.DeliverCounter, 0) // init counter to 0
 }
 
 // create publisher instance with specified topic.
-func (delivery *ServiceDelivery) createPublisher(topic string) *micro.Publisher {
-	pub := micro.NewPublisher(topic, (*delivery.microService).Client())
+func (m *MicroService) createPublisher(topic string) *micro.Publisher {
+	pub := micro.NewPublisher(topic, (*instance.microService).Client())
 
 	return &pub
 }
 
 // getPublisher get publisher instance with specified topic.
-func (delivery *ServiceDelivery) getPublisher(topic string) *micro.Publisher {
-	pub, ok := delivery.pubSMap.Load(topic)
+func (m *MicroService) getPublisher(topic string) *micro.Publisher {
+	pub, ok := m.pubSMap.Load(topic)
 	if !ok {
-		pub = delivery.createPublisher(topic)
+		pub = m.createPublisher(topic)
 		if pub == nil {
 			log.WithFields(log.Fields{
 				"topic": topic,
@@ -76,7 +46,7 @@ func (delivery *ServiceDelivery) getPublisher(topic string) *micro.Publisher {
 			return nil
 		}
 
-		delivery.pubSMap.Store(topic, pub.(*micro.Publisher))
+		m.pubSMap.Store(topic, pub.(*micro.Publisher))
 	}
 
 	return pub.(*micro.Publisher)
@@ -93,8 +63,8 @@ func generateEvent(magic int64, msg string) *pb.Event {
 }
 
 // SendMsgWithTopic send message to specified topic by publisher.
-func (delivery *ServiceDelivery) SendMsgWithTopic(topic string, magic int64, msg string) {
-	publisher := delivery.getPublisher(topic)
+func (m *MicroService) SendMsgWithTopic(topic string, magic int64, msg string) {
+	publisher := m.getPublisher(topic)
 	if publisher != nil {
 		for { // continue to retry publish message until success
 			ev := generateEvent(magic, msg)
@@ -107,7 +77,7 @@ func (delivery *ServiceDelivery) SendMsgWithTopic(topic string, magic int64, msg
 					"error info": err.Error(),
 				}).Error("publish event to topic failed, wait for 5s to retry...")
 			} else {
-				atomic.AddUint64(&delivery.DeliverCounter, 1) // count deliver num
+				atomic.AddUint64(&m.DeliverCounter, 1) // count deliver num
 
 				// only for debug
 				log.WithFields(log.Fields{
@@ -121,7 +91,7 @@ func (delivery *ServiceDelivery) SendMsgWithTopic(topic string, magic int64, msg
 }
 
 // TaskSend send message using scheduler DataBlock.
-func (delivery *ServiceDelivery) TaskSend(data *sc.DataBlock) {
+func (m *MicroService) TaskSend(data *sc.DataBlock) {
 	defer func() { // add recover to catch panic
 		if err := recover(); err != nil {
 			log.WithFields(log.Fields{
@@ -132,11 +102,11 @@ func (delivery *ServiceDelivery) TaskSend(data *sc.DataBlock) {
 	}()
 
 	pubInfo := data.Extra.(cm.PubInfo) //transfer to cm.PubInfo type for get topic and magic
-	delivery.SendMsgWithTopic(pubInfo.Topic, pubInfo.Magic, strconv.Itoa(data.Message.(int)))
+	m.SendMsgWithTopic(pubInfo.Topic, pubInfo.Magic, strconv.Itoa(data.Message.(int)))
 }
 
 // RegisterSubscriber return false if register subscriber receive process function to specified topic failed.
-func (delivery *ServiceDelivery) RegisterSubscriber(function interface{}, topic string) bool {
+func (m *MicroService) RegisterSubscriber(function interface{}, topic string) bool {
 	if function == nil {
 		log.Error("can not register subscriber, for process function is nil !")
 
@@ -148,7 +118,7 @@ func (delivery *ServiceDelivery) RegisterSubscriber(function interface{}, topic 
 		return false
 	}
 
-	err := micro.RegisterSubscriber(topic, (*delivery.microService).Server(), function)
+	err := micro.RegisterSubscriber(topic, (*m.microService).Server(), function)
 
 	if err != nil {
 		log.WithFields(log.Fields{
@@ -167,7 +137,7 @@ func (delivery *ServiceDelivery) RegisterSubscriber(function interface{}, topic 
 }
 
 // RegisterSubscriberWithCh return false if register subscriber receive process function to specified topic and channel failed.
-func (delivery *ServiceDelivery) RegisterSubscriberWithCh(function interface{}, topic string, channel string) bool {
+func (m *MicroService) RegisterSubscriberWithCh(function interface{}, topic string, channel string) bool {
 	if function == nil {
 		log.Error("can not register subscriber, for process function is nil !")
 
@@ -180,8 +150,7 @@ func (delivery *ServiceDelivery) RegisterSubscriberWithCh(function interface{}, 
 	}
 
 	// register subscriber with queue, each message is delivered to a unique subscriber
-	err := micro.RegisterSubscriber(topic, (*delivery.microService).Server(), function, server.SubscriberQueue(channel)) // specified a channel name
-
+	err := micro.RegisterSubscriber(topic, (*m.microService).Server(), function, server.SubscriberQueue(channel)) // specified a channel name
 	if err != nil {
 		log.WithFields(log.Fields{
 			"topic":      topic,

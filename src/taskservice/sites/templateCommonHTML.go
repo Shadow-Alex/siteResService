@@ -5,6 +5,7 @@
 package sites
 
 import (
+	ut "siteResService/src/util"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -30,30 +31,30 @@ func (s *SiteService) ParseInfoCommonHTML(pageURL string, doc *goquery.Document,
 
 	// cover image
 	imageDir := cm.ImageDir + time.Now().Format("2006/01/02")
-	pi.Cover = s.ParseCoverImagesHTML(doc, pageURL, imageDir, labels.Cover)
+	pi.Cover = s.parseCoverImagesHTML(doc, pageURL, imageDir, labels.Cover)
 	//pi.Images = images
 	//if len(pi.Images) > 0 {
 	//	pi.Cover = pi.Images[0].URL
 	//}
 
 	// title
-	pi.Title = s.ParseTitleHTML(doc, labels.Title)
+	pi.Title = s.parseTitleHTML(doc, labels.Title)
 
 	// price
-	pi.Price = s.ParsePriceHTML(doc, labels.Price)
+	pi.Price = s.parsePriceHTML(doc, labels.Price)
 
 	// description
-	pi.Desc = s.parseDescHTML(doc, pageURL, imageDir, labels.Desc)
+	pi.Desc = ut.ToJson(s.parseDescHTML(doc, pageURL, imageDir, labels.Desc))
 
 	if orderDoc == nil {  // main and order at the same page or can find order page
 		// set meal
-		pi.Set = s.parseSetHTML(doc, pageURL, imageDir, labels.Set)
+		pi.Set = s.parseGoodHTML(doc, pageURL, imageDir, labels.Good)
 
 		// specifications
 		pi.Spec = s.parseSpecHTML(doc, pageURL, imageDir, labels.Spec)
 	} else {  // order at another page, request order page to get order document
 		// set meal
-		pi.Set = s.parseSetHTML(orderDoc, pageURL, imageDir, labels.Set)
+		pi.Set = s.parseGoodHTML(orderDoc, pageURL, imageDir, labels.Good)
 
 		// specifications
 		pi.Spec = s.parseSpecHTML(orderDoc, pageURL, imageDir, labels.Spec)
