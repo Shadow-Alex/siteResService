@@ -490,17 +490,21 @@ func getSpecifiedRes(pi *cm.ProInfo, resTitle string) interface{} {
 		case "title":
 			return pi.Title
 
+		case "currency":
+			return pi.Currency
+
 		case "price":
 			return pi.Price
 
 		case "desc":
 			return pi.Desc
 
+		case "good":
+			return pi.Good
+
 		case "spec":
 			return pi.Spec
 
-		case "set":
-			return pi.Set
 
 		default:
 			return ut.ToJson(pi)

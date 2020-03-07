@@ -58,7 +58,7 @@ func (s *SiteService) ParseInfoCustomHTML1(pageURL string) *cm.ProInfo {
 	pi.Title = doc.Find(".pw-h").Text()
 
 	// price
-	pi.Price = doc.Find("#price_span").Text()
+	//pi.Price = doc.Find("#price_span").Text()
 
 	// description
 	pi.Desc, _ = doc.Find("#tab1").Html()

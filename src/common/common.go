@@ -181,11 +181,11 @@ type ProInfo struct {
 	PageURL 	string
 	Cover   	[]string  // head image
 	Title   	string
-	Price   	string
+	Price   	[]string
+	Currency	string  // currency unit
 	Desc    	string  // descriptions with image
 	Spec    	[][]string  // specifications with image
-	Set			[][]string  // set meal
-	//Images  	[]ImageInfo
+	Good		[][]string  // set meal
 	Template	string
 }
 
@@ -212,6 +212,28 @@ type CargoExtInfo struct {
 type DownLoadInfo struct {
 	URL		string
 	Name	string
+}
+
+// GetCurrencyList for get currency unit list
+func GetCurrencyList() []string {
+	var currencyList []string
+	currencyList = append(currencyList, "MY")
+	currencyList = append(currencyList, "MY")
+	currencyList = append(currencyList, "HK")
+	currencyList = append(currencyList, "NT")
+	currencyList = append(currencyList, "SG")
+	currencyList = append(currencyList, "SAR")
+	currencyList = append(currencyList, "AED")
+	currencyList = append(currencyList, "AED")
+	currencyList = append(currencyList, "AED")
+	currencyList = append(currencyList, "AED")
+	currencyList = append(currencyList, "THB")
+	currencyList = append(currencyList, "RP")
+	currencyList = append(currencyList, "RP")
+	currencyList = append(currencyList, "RP")
+	currencyList = append(currencyList, "USD")
+
+	return currencyList
 }
 
 // GetDBConns for get db connection string

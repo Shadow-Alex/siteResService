@@ -88,7 +88,7 @@ func (s *SiteService) parse1(pageURL string) *cm.ProInfo {
 	pi.Title = title
 
 	// price
-	pi.Price = doc.Find(".price>ins").Text()
+	//pi.Price = doc.Find(".price>ins").Text()
 
 	// description list - class=product_info second
 	doc.Find(".product_info").Each(func(i int, selection *goquery.Selection) {

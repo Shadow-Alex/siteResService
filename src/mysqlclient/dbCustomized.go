@@ -5,10 +5,11 @@
 package db
 
 import (
-	"github.com/astaxie/beego/orm"
-	log "github.com/sirupsen/logrus"
 	"runtime/debug"
 	"sync/atomic"
+
+	"github.com/astaxie/beego/orm"
+	log "github.com/sirupsen/logrus"
 )
 
 // CustomizedDBQueryColumn return num of query result and last query item's createTime

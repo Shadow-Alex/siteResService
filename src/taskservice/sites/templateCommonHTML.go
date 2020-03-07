@@ -48,16 +48,20 @@ func (s *SiteService) ParseInfoCommonHTML(pageURL string, doc *goquery.Document,
 
 	if orderDoc == nil {  // main and order at the same page or can find order page
 		// set meal
-		pi.Set = s.parseGoodHTML(doc, pageURL, imageDir, labels.Good)
+		pi.Good = s.parseGoodHTML(doc, pageURL, imageDir, labels.Good)
 
 		// specifications
 		pi.Spec = s.parseSpecHTML(doc, pageURL, imageDir, labels.Spec)
 	} else {  // order at another page, request order page to get order document
 		// set meal
-		pi.Set = s.parseGoodHTML(orderDoc, pageURL, imageDir, labels.Good)
+		pi.Good = s.parseGoodHTML(orderDoc, pageURL, imageDir, labels.Good)
 
 		// specifications
 		pi.Spec = s.parseSpecHTML(orderDoc, pageURL, imageDir, labels.Spec)
+	}
+
+	if len(pi.Good) > 0 {
+		pi.Currency = s.parseCurrency(pi.Good[0][2])
 	}
 
 	return &pi

@@ -50,11 +50,15 @@ func (s *SiteService) ParseInfoCommonJSON(pageURL string, body []byte, labels *c
 	// description
 	pi.Desc = ut.ToJson(s.parseDescJSON(body, pageURL, labels.Desc))
 
-	// set meal
-	pi.Set = s.parseGoodJSON(body, pageURL, labels.Good)
-
 	// specifications
 	pi.Spec = s.parseSpecJSON(body, pageURL, labels.Spec)
+
+	// set meal
+	pi.Good = s.parseGoodJSON(body, pageURL, labels.Good)
+
+	if len(pi.Good) > 0 {
+		pi.Currency = s.parseCurrency(pi.Good[0][2])
+	}
 
 	return &pi
 }

@@ -70,7 +70,7 @@ func (s *SiteService) ParseInfoCustomJSON1(pageURL string) *cm.ProInfo {
 	pi.Title = jsoniter.Get(resp.Body, "info", "name").ToString()
 
 	// price
-	pi.Price = jsoniter.Get(resp.Body, "info", "cover").ToString()
+	//pi.Price = jsoniter.Get(resp.Body, "info", "cover").ToString()
 
 	//
 	//pi.ID = ids[1] // doc.Find(".pw-s").Text()

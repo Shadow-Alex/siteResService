@@ -163,13 +163,13 @@ func initSiteFile(fileName string, titles []string) *os.File {
 // InitSiteResultFile for init site Result file
 func (sa *StandAlone) initSiteResultFile() {
 	// init site resource file
-	titles := []string{"pageURLMD5", "pageURL", "creatTime", "coverInJson", "title", "price", "descriptions", "template"}
+	titles := []string{"pageURLMD5", "pageURL", "creatTime", "coverInJson", "title", "price", "currency", "descriptions", "template"}
 	sa.siteResFile = initSiteFile(cm.SiteResourceFile, titles)
 	// init site specifications file
 	titles = []string{"pageURLMD5", "type", "mapping", "specText","specImage"}
 	sa.siteSpecFile = initSiteFile(cm.SiteSpecFile, titles)
 	// init site set meals file
-	titles = []string{"pageURLMD5", "goodText", "goodImage"}
+	titles = []string{"pageURLMD5", "price", "goodText", "goodImage"}
 	sa.siteGoodFile = initSiteFile(cm.SiteGoodFile, titles)
 }
 
@@ -256,7 +256,8 @@ func generateProInfoSlice(proInfo *cm.ProInfo) []string {
 	proStr = append(proStr, strconv.FormatInt(time.Now().Unix(),10))
 	proStr = append(proStr, cover)
 	proStr = append(proStr, proInfo.Title)
-	proStr = append(proStr, proInfo.Price)
+	proStr = append(proStr, ut.ToJson(proInfo.Price))
+	proStr = append(proStr, proInfo.Currency)
 	proStr = append(proStr, scriptTackle(proInfo.Desc))
 	proStr = append(proStr, proInfo.Template)
 
@@ -286,11 +287,11 @@ func (sa *StandAlone) TaskSaveResultToFile(data *sc.DataBlock) {
 	w := csv.NewWriter(sa.siteResFile)
 	writeCSVFile(w, [][]string{generateProInfoSlice(proInfo)})
 
+	w = csv.NewWriter(sa.siteGoodFile)
+	writeCSVFile(w, proInfo.Good)
+
 	w = csv.NewWriter(sa.siteSpecFile)
 	writeCSVFile(w, proInfo.Spec)
-
-	w = csv.NewWriter(sa.siteGoodFile)
-	writeCSVFile(w, proInfo.Set)
 
 	// chmod
 	//fp := proInfo.Cover[0].URL
